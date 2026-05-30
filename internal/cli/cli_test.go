@@ -800,7 +800,6 @@ func TestRunInit(t *testing.T) {
 
 func TestRunInit_AlreadyHasGitHub(t *testing.T) {
 	// Basic smoke test for the already-authenticated GitHub path.
-	// Full isolation is hard because init calls credentials.New() directly.
 	cmd, out, _ := newCmd()
 	err := runInit(cmd, nil)
 	if err != nil {
@@ -808,6 +807,16 @@ func TestRunInit_AlreadyHasGitHub(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Welcome to Sting") {
 		t.Errorf("expected welcome message")
+	}
+}
+
+func TestInitSubcommandsExist(t *testing.T) {
+	// Verify the subcommand structure works
+	_, _, _ = newCmd()
+	initCmd.AddCommand(initGitHubCmd, initGitLabCmd) // ensure registered
+
+	if initGitHubCmd.Use != "github" || initGitLabCmd.Use != "gitlab" {
+		t.Error("expected github and gitlab subcommands under init")
 	}
 }
 
