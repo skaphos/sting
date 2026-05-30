@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/skaphos/sting/internal/config"
+	"github.com/skaphos/sting/config"
 )
 
 // TestReadOnlyTools pins the read-only tool set. sting is read-only by design,

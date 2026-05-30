@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 // newTestClient builds a Client pointed at the given test server.
