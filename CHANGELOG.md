@@ -4,6 +4,13 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/skaphos/sting/compare/v1.0.0...v1.1.0) (2026-05-30)
+
+
+### Features
+
+* add GitLab commit provider ([#6](https://github.com/skaphos/sting/issues/6)) ([51acee1](https://github.com/skaphos/sting/commit/51acee163105dd0c3e8437908ff80a6d5edbff44))
+
 ## 1.0.0 (2026-05-30)
 
 
