@@ -1,0 +1,104 @@
+version: 2
+
+project_name: sting
+
+builds:
+  - id: sting
+    main: ./cmd/sting
+    binary: sting
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/skaphos/sting/internal/cli.Version={{.Version}}
+      - -X github.com/skaphos/sting/internal/cli.Commit={{.Commit}}
+      - -X github.com/skaphos/sting/internal/cli.Date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - THIRD_PARTY_NOTICES.md
+      - third_party_licenses/**
+
+checksum:
+  name_template: "checksums.txt"
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^chore\\("
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  mode: replace
+  draft: false
+  make_latest: true
+
+homebrew_casks:
+  - repository:
+      owner: skaphos
+      name: homebrew-tools
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/skaphos/sting"
+    description: "Query a GitHub user's commits over a time window, as a CLI or MCP server"
+    license: "MIT"
+    binaries:
+      - sting
+    custom_block: |
+      postflight do
+        if OS.mac?
+          system_command "/usr/bin/xattr",
+                         args: ["-dr", "com.apple.quarantine", "#{staged_path}/sting"]
+        end
+      end
+
+snapshot:
+  version_template: "{{ .Tag }}-next"

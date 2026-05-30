@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "sting": {
+      "type": "local",
+      "command": [],
+      "enabled": true
+    }
+  }
+}

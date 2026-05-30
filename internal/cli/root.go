@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package cli is the cobra command tree for the sting CLI: querying commits,
 // running the MCP server, and installing/uninstalling the server into agent
 // runtimes. Configuration is resolved with viper (defaults < config file < env
@@ -56,7 +57,7 @@ func init() {
 
 	registerQueryFlags(rootCmd)
 
-	rootCmd.AddCommand(mcpCmd, installCmd, uninstallCmd)
+	rootCmd.AddCommand(mcpCmd, installCmd, uninstallCmd, versionCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config

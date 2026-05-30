@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package mcpinstall registers and removes sting's MCP server entry in the
 // config files of agent runtimes (Claude Code, Codex, OpenCode, Grok). Each
 // runtime has an adapter translating the runtime-agnostic Entry into that

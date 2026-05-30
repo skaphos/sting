@@ -1,0 +1,4 @@
+[mcp_servers.sting]
+command = "/usr/local/bin/sting"
+args = ["mcp"]
+enabled = true

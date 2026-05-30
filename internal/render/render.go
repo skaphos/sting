@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package render serializes a query Result into the supported output formats.
 package render
 
