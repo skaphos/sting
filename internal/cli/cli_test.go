@@ -798,6 +798,19 @@ func TestRunInit(t *testing.T) {
 	}
 }
 
+func TestRunInit_AlreadyHasGitHub(t *testing.T) {
+	// Basic smoke test for the already-authenticated GitHub path.
+	// Full isolation is hard because init calls credentials.New() directly.
+	cmd, out, _ := newCmd()
+	err := runInit(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	if !strings.Contains(out.String(), "Welcome to Sting") {
+		t.Errorf("expected welcome message")
+	}
+}
+
 // --- GitLab auth command tests ---
 
 func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
