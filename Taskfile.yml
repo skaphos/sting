@@ -2,6 +2,12 @@
 version: "3"
 
 vars:
+  TASK_RUNNER: go -C tools tool task -d ..
+  GOLANGCI_RUNNER: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+  GOIMPORTS_RUNNER: go run golang.org/x/tools/cmd/goimports@v0.43.0
+  STATICCHECK_RUNNER: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0
+  GOVULNCHECK_RUNNER: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4
+  SVU_RUNNER: go run github.com/caarlos0/svu/v3@v3.4.0
   BIN: sting
   PKG: ./cmd/sting
 
@@ -9,28 +15,69 @@ tasks:
   default:
     desc: List available tasks
     cmds:
-      - task --list
-    silent: true
+      - '{{.TASK_RUNNER}} --list'
+
+  list:
+    desc: List available tasks
+    cmds:
+      - '{{.TASK_RUNNER}} --list'
 
   build:
-    desc: Build the sting binary into ./bin
+    desc: Build the sting binary for the local OS/ARCH
     cmds:
-      - go build -o bin/{{.BIN}} {{.PKG}}
+      - go build -o {{.BIN}} {{.PKG}}
+
+  build-ci:
+    desc: Build all configured platform binaries (CI-style snapshot build)
+    cmds:
+      - '{{if eq OS "windows"}}powershell -NoProfile -Command "if (-not (Get-Command goreleaser -ErrorAction SilentlyContinue)) { Write-Error ''goreleaser not found in PATH; install the version declared in .tool-versions''; exit 1 }; goreleaser build --snapshot --clean"{{else}}command -v goreleaser >/dev/null 2>&1 || { echo "goreleaser not found in PATH; install the version declared in .tool-versions" >&2; exit 1; }; goreleaser build --snapshot --clean{{end}}'
 
   install:
-    desc: Install sting into GOBIN
+    desc: Install sting into $GOPATH/bin
     cmds:
       - go install {{.PKG}}
 
+  uninstall:
+    desc: Uninstall sting from $GOPATH/bin
+    cmds:
+      - go clean -i github.com/skaphos/sting/cmd/sting
+
+  notices:
+    desc: Regenerate third-party notice inventories and license texts
+    cmds:
+      - '{{if eq OS "windows"}}powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-notices.ps1{{else}}./scripts/generate-notices.sh{{end}}'
+
   test:
-    desc: Run all tests
+    desc: Run the test suite
     cmds:
       - go test ./...
 
-  test:race:
+  test-race:
     desc: Run tests with the race detector
     cmds:
       - go test -race ./...
+
+  test-cover:
+    desc: Run tests with coverage output
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+
+  test-cover-check:
+    desc: Run tests with coverage and enforce per-package thresholds
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - '{{if eq OS "windows"}}powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-coverage.ps1 coverage.out{{else}}./scripts/check-coverage.sh coverage.out{{end}}'
+
+  lint:
+    desc: Run linters
+    cmds:
+      - '{{.GOLANGCI_RUNNER}} run ./...'
+
+  fmt:
+    desc: Format code
+    cmds:
+      - '{{.GOIMPORTS_RUNNER}} -w .'
+      - go fmt ./...
 
   vet:
     desc: Run go vet
@@ -42,12 +89,20 @@ tasks:
     cmds:
       - go mod tidy
 
-  check:
-    desc: Tidy, vet, and test
+  staticcheck:
+    desc: Run staticcheck directly
     cmds:
-      - task: tidy
-      - task: vet
-      - task: test
+      - '{{.STATICCHECK_RUNNER}} ./...'
+
+  vuln:
+    desc: Run vulnerability scan
+    cmds:
+      - '{{.GOVULNCHECK_RUNNER}} ./...'
+
+  version-next:
+    desc: Show next semantic version from git history (svu)
+    cmds:
+      - '{{.SVU_RUNNER}} next'
 
   run:
     desc: 'Run a CLI query, e.g. task run -- --author mendedlink --window 7d'
@@ -59,7 +114,18 @@ tasks:
     cmds:
       - go run {{.PKG}} mcp
 
-  install:
-    desc: 'Register sting with detected agent runtimes (pass flags after --)'
+  clean:
+    desc: Remove build artifacts and clear Go build outputs
     cmds:
-      - go run {{.PKG}} install {{.CLI_ARGS}}
+      - go clean ./...
+      - go clean -testcache
+      - '{{if eq OS "windows"}}powershell -NoProfile -Command "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force sting.exe,sting,coverage.out -ErrorAction SilentlyContinue"{{else}}rm -rf dist sting coverage.out{{end}}'
+
+  ci:
+    desc: Run standard CI workflow locally
+    deps:
+      - lint
+      - test
+      - staticcheck
+      - vuln
+      - build-ci

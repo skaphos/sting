@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package ghclient wraps the go-github client with the commit-discovery
 // strategies the tool needs and normalizes results into model types.
 package ghclient

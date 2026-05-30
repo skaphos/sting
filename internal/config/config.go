@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package config defines the tool's settings and the flexible time-window
 // parsing used to bound a query. Loading and source precedence (config file,
 // environment, flags) is handled by viper in the CLI layer; this package stays
