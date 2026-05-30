@@ -9,7 +9,7 @@ Sting supports two authentication methods:
 
 This guide explains how to register an OAuth App so Sting can use modern OAuth-based login (similar to `gh auth login` and `glab auth login --device`).
 
-Sting ships with credentials for an **official Skaphos-published OAuth App** on github.com. For GitLab (gitlab.com and self-hosted) you register your own application (or use `--with-token` as an immediate fallback). You can always register and use your own app on any provider.
+Sting ships with credentials for **official Skaphos-published OAuth Apps** on both github.com and gitlab.com. For self-hosted GitLab (or GitHub Enterprise Server) you register your own application. You can always register and use your own app on any provider.
 
 ## Why Register an OAuth App?
 
@@ -70,7 +70,7 @@ Until the configuration support lands, you can still use `--with-token` to suppl
 
 Sting uses GitLab's native **Device Authorization Grant** flow (the same approach as `glab auth login --device`). This is the recommended path for CLIs.
 
-There is currently no baked-in Skaphos public OAuth App for GitLab.com. You must create an application and pass its Client ID (via `--client-id` or the `STING_GITLAB_CLIENT_ID` environment variable).
+Sting ships with credentials for an official Skaphos OAuth App on gitlab.com, so `sting auth gitlab` works out of the box for the public service. For any self-hosted GitLab instance you must register your own application.
 
 ### Recommended Settings
 
@@ -160,7 +160,7 @@ Sting requests the minimal scope needed (`read_api` for GitLab, `repo` + `read:o
 ## Next Steps / Status
 
 - GitHub OAuth (with public Skaphos app + GHES bring-your-own) is fully implemented and documented.
-- GitLab OAuth device flow is implemented (no public Skaphos app yet; users register their own or use `--with-token`).
+- GitLab OAuth device flow is implemented with a public Skaphos app for gitlab.com + self-hosted bring-your-own support.
 - This registration guide is being kept in sync with the code (see `sting auth gitlab --help` and the error messages for the latest instructions).
 
 See also:

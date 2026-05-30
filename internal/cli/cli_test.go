@@ -786,7 +786,7 @@ func TestMustNoPanic(t *testing.T) {
 
 // --- GitLab auth command tests ---
 
-func TestRunAuthGitLab_MissingClientID(t *testing.T) {
+func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
 	// Ensure clean globals for this test
 	origID := authGitLabClientID
 	origHost := authGitLabHostname
@@ -805,15 +805,18 @@ func TestRunAuthGitLab_MissingClientID(t *testing.T) {
 
 	err := runAuthGitLab(cmd, nil)
 	if err == nil {
-		t.Fatal("expected error for missing client ID")
+		t.Fatal("expected error when using default creds on self-hosted GitLab")
 	}
 
 	msg := err.Error()
-	if !strings.Contains(msg, "GitLab device flow requires a client_id") {
-		t.Errorf("error should mention client_id requirement, got: %v", err)
+	if !strings.Contains(msg, "Self-hosted GitLab detected") {
+		t.Errorf("error should mention self-hosted detection, got: %v", err)
 	}
-	if !strings.Contains(msg, "gitlab.example.com/-/user_settings/applications") {
-		t.Errorf("error should contain self-hosted app creation URL, got: %v", err)
+	if !strings.Contains(msg, "gitlab.example.com") {
+		t.Errorf("error should mention the hostname, got: %v", err)
+	}
+	if !strings.Contains(msg, "register an OAuth Application") {
+		t.Errorf("error should instruct user to register their own app, got: %v", err)
 	}
 	if !strings.Contains(msg, "Device authorization grant flow") {
 		t.Errorf("error should mention enabling device flow, got: %v", err)
