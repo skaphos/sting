@@ -3,10 +3,14 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/atotto/clipboard"
+	"github.com/cli/oauth/device"
 	"github.com/skaphos/sting/internal/credentials"
 	"github.com/spf13/cobra"
 )
@@ -14,30 +18,35 @@ import (
 var authGitLabCmd = &cobra.Command{
 	Use:     "gitlab",
 	Aliases: []string{"login gitlab"},
-	Short:   "Authenticate with GitLab",
-	Long: `Authenticate with GitLab (GitLab.com or self-hosted).
+	Short:   "Authenticate with GitLab using OAuth Device Flow",
+	Long: `Authenticate with GitLab.com or a self-hosted GitLab instance using the
+OAuth 2.0 Device Authorization flow (the recommended method, same as glab).
 
-Full OAuth device flow support (similar to glab) is coming soon.
-
-For now you can:
-  - Store a Personal Access Token using --with-token (recommended for the new credential system)
-  - Continue using legacy PATs via STING_GITLAB_TOKEN or config
+You must provide a Client ID via --client-id or the STING_GITLAB_CLIENT_ID
+environment variable. For self-hosted GitLab you will need to create your own
+OAuth application and enable "Device authorization grant flow".
 
 Examples:
   sting auth gitlab
-  sting auth login gitlab
-  sting auth gitlab --hostname gitlab.example.com --with-token < mytoken.txt`,
+  sting auth login gitlab --hostname gitlab.example.com --client-id YOUR_ID
+  echo 'glpat-xxxx' | sting auth gitlab --with-token`,
 	RunE: runAuthGitLab,
 }
 
 var (
-	authGitLabHostname string
-	authGitLabWithToken bool
+	authGitLabHostname     string
+	authGitLabWithToken    bool
+	authGitLabClientID     string
+	authGitLabClientSecret string
+	authGitLabClipboard    bool
 )
 
 func init() {
 	authGitLabCmd.Flags().StringVar(&authGitLabHostname, "hostname", "", "GitLab hostname (default: gitlab.com)")
-	authGitLabCmd.Flags().BoolVar(&authGitLabWithToken, "with-token", false, "Read a Personal Access Token from standard input and store it")
+	authGitLabCmd.Flags().BoolVar(&authGitLabWithToken, "with-token", false, "Read a Personal Access Token from standard input")
+	authGitLabCmd.Flags().StringVar(&authGitLabClientID, "client-id", "", "OAuth application Client ID (required for device flow)")
+	authGitLabCmd.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (usually not needed)")
+	authGitLabCmd.Flags().BoolVarP(&authGitLabClipboard, "clipboard", "c", false, "Copy the user code to the clipboard")
 }
 
 func runAuthGitLab(cmd *cobra.Command, _ []string) error {
@@ -49,7 +58,6 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 	provider := credentials.ProviderGitLab
 
 	if authGitLabWithToken {
-		// Read PAT from stdin (like gh --with-token)
 		scanner := bufio.NewScanner(os.Stdin)
 		var token string
 		for scanner.Scan() {
@@ -91,17 +99,91 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Default path: show guidance
-	fmt.Fprintln(cmd.OutOrStdout(), "GitLab authentication")
+	// Real Device Flow
+	clientID := authGitLabClientID
+	if clientID == "" {
+		clientID = os.Getenv("STING_GITLAB_CLIENT_ID")
+	}
+	if clientID == "" {
+		return fmt.Errorf(`GitLab device flow requires a client_id.
+
+Create an OAuth application at:
+  https://%s/-/user_settings/applications   (or on your self-hosted instance)
+
+Enable "Device authorization grant flow".
+
+Then run:
+  sting auth gitlab --hostname %s --client-id YOUR_CLIENT_ID
+
+You can also store a PAT with --with-token.`, hostname, hostname)
+	}
+
+	clientSecret := authGitLabClientSecret
+	if clientSecret == "" {
+		clientSecret = os.Getenv("STING_GITLAB_CLIENT_SECRET")
+	}
+
+	baseURL := "https://" + hostname
+	deviceURL := baseURL + "/oauth/authorize_device"
+	tokenURL := baseURL + "/oauth/token"
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Requesting device code for %s...\n", hostname)
+
+	code, err := device.RequestCode(http.DefaultClient, deviceURL, clientID, []string{"api"})
+	if err != nil {
+		if err == device.ErrUnsupported {
+			return fmt.Errorf("this GitLab instance does not support device flow. Use --with-token instead.")
+		}
+		return fmt.Errorf("failed to request device code: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\nFirst copy your one-time code: %s\n", code.UserCode)
+
+	if authGitLabClipboard {
+		if err := clipboard.WriteAll(code.UserCode); err == nil {
+			fmt.Fprintln(cmd.OutOrStdout(), "  (copied to clipboard)")
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Then visit: %s\n\n", code.VerificationURI)
+	fmt.Fprintln(cmd.OutOrStdout(), "Waiting for authorization...")
+
+	token, err := device.Wait(context.Background(), http.DefaultClient, tokenURL, device.WaitOptions{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		DeviceCode:   code,
+	})
+	if err != nil {
+		if err == device.ErrTimeout {
+			return fmt.Errorf("device authorization timed out")
+		}
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	// Save the OAuth token
+	store, err := credentials.New()
+	if err != nil {
+		return fmt.Errorf("initialize credential store: %w", err)
+	}
+
+	cred := credentials.Token{
+		Type:        credentials.TokenTypeOAuth,
+		AccessToken: token.Token,
+	}
+
+	usedInsecure, err := store.Save(cmd.Context(), provider, hostname, cred, false)
+	if err != nil {
+		return fmt.Errorf("failed to store GitLab token: %w", err)
+	}
+
 	fmt.Fprintln(cmd.OutOrStdout())
-	fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", hostname)
-	fmt.Fprintln(cmd.OutOrStdout(), "Full OAuth device flow (like glab) is coming soon.")
-	fmt.Fprintln(cmd.OutOrStdout())
-	fmt.Fprintln(cmd.OutOrStdout(), "For now you can store a Personal Access Token:")
-	fmt.Fprintf(cmd.OutOrStdout(), "  sting auth gitlab --hostname %s --with-token < mytoken.txt\n", hostname)
-	fmt.Fprintln(cmd.OutOrStdout())
-	fmt.Fprintln(cmd.OutOrStdout(), "Or continue using the legacy method:")
-	fmt.Fprintln(cmd.OutOrStdout(), "  STING_GITLAB_TOKEN or 'gitlab_token' in config")
+	if usedInsecure {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved (insecure fallback).\n")
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to system keyring.\n")
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  Host: %s\n", hostname)
+	fmt.Fprintln(cmd.OutOrStdout(), "\nYou can now use `sting auth status` to verify.")
 
 	return nil
 }
