@@ -39,7 +39,6 @@ Use --web to automatically open the verification page in your browser.
 
 Examples:
   sting auth gitlab
-  sting auth login gitlab
   sting auth gitlab --web
   sting auth gitlab --hostname gitlab.example.com --client-id YOUR_ID`,
 	RunE: runAuthGitLab,

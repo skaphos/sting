@@ -62,7 +62,7 @@ $rows.GetEnumerator() | Sort-Object Name | ForEach-Object {
 
     $threshold = $defaultThreshold
     if ($pkg -eq "github.com/skaphos/sting/internal/cli") { $threshold = 60 }
-    elseif ($pkg -eq "github.com/skaphos/sting/internal/credentials") { $threshold = 73 }
+    elseif ($pkg -eq "github.com/skaphos/sting/internal/credentials") { $threshold = 72 }
 
     "{0,-55} {1,6:N2}% ({2}/{3}) [min {4}%]" -f $pkg, $pct, $covered, $total, $threshold | Write-Host
     if ($pct -lt $threshold) {

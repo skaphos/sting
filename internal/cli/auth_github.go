@@ -38,7 +38,6 @@ Use --web to force the browser-based flow instead.
 
 Examples:
   sting auth github
-  sting auth login github
   sting auth github --hostname ghe.example.com --web`,
 	RunE: runAuthGitHub,
 }
@@ -58,11 +57,10 @@ func init() {
 	authGitHubCmd.Flags().BoolVar(&authGitHubInsecure, "insecure-storage", false, "Save the token to the config file instead of the system keyring")
 	authGitHubCmd.Flags().BoolVarP(&authGitHubClipboard, "clipboard", "c", false, "Copy the one-time code to the clipboard (device flow only)")
 
-	// Allow overriding the OAuth app credentials (useful for GHES or bring-your-own)
-	authGitHubCmd.Flags().StringVar(&authGitHubClientID, "client-id", "", "OAuth client ID (advanced)")
-	authGitHubCmd.Flags().StringVar(&authGitHubClientSecret, "client-secret", "", "OAuth client secret (advanced)")
-	_ = authGitHubCmd.Flags().MarkHidden("client-id")
-	_ = authGitHubCmd.Flags().MarkHidden("client-secret")
+	// Allow overriding the OAuth app credentials (required for GHES bring-your-own apps).
+	// These are documented in the Long help, so they are intentionally visible in --help.
+	authGitHubCmd.Flags().StringVar(&authGitHubClientID, "client-id", "", "OAuth client ID (required for GitHub Enterprise Server)")
+	authGitHubCmd.Flags().StringVar(&authGitHubClientSecret, "client-secret", "", "OAuth client secret (required for GitHub Enterprise Server)")
 }
 
 // credentialStoreForStorage returns a credential store honoring the
