@@ -31,7 +31,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("initialize credential store: %w", err)
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Authentication status:\n")
+	fmt.Fprintln(cmd.OutOrStdout(), "Authentication status:")
+	fmt.Fprintln(cmd.OutOrStdout())
 
 	refs, err := store.List(cmd.Context())
 	if err != nil {

@@ -35,7 +35,8 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 		}
 		return client, nil
 	case model.ProviderGitLab:
-		client, err := gitlabclient.New(cfg.GitLabToken, cfg.GitLabBaseURL, cfg.PerPage)
+		token := resolveGitLabToken(cfg)
+		client, err := gitlabclient.New(token, cfg.GitLabBaseURL, cfg.PerPage)
 		if err != nil {
 			return nil, fmt.Errorf("build gitlab client: %w", err)
 		}
@@ -57,4 +58,18 @@ func resolveGitHubToken(cfg config.Config) string {
 
 	// Legacy fallback (STING_TOKEN, config token, etc.)
 	return cfg.Token
+}
+
+// resolveGitLabToken prefers the new credentials store (OAuth tokens or PATs
+// stored via `sting auth gitlab`), falling back to the legacy gitlab_token
+// (config or STING_GITLAB_TOKEN) for backward compatibility.
+func resolveGitLabToken(cfg config.Config) string {
+	if store, err := credentials.New(); err == nil {
+		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitLab, "gitlab.com"); err == nil && tok.AccessToken != "" {
+			return tok.AccessToken
+		}
+	}
+
+	// Legacy fallback
+	return cfg.GitLabToken
 }
