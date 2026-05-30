@@ -11,7 +11,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skaphos/sting/config"
-	"github.com/skaphos/sting/ghclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -28,18 +27,16 @@ func firstText(res *mcp.CallToolResult) string {
 // newTestHandler builds a handler whose client points at srv.
 func newTestHandler(t *testing.T, srv *httptest.Server) *handler {
 	t.Helper()
-	c, err := ghclient.New("", srv.URL+"/", 100)
-	if err != nil {
-		t.Fatalf("ghclient.New: %v", err)
-	}
-	return &handler{cfg: config.Default(), client: c}
+	cfg := config.Default()
+	cfg.BaseURL = srv.URL + "/"
+	return &handler{cfg: cfg}
 }
 
 // TestGetCommitsResolveError covers the resolve-failure branch (and errorResult):
 // an empty Author fails config.Resolve, so getCommits returns an IsError result
 // with non-empty text and a zero model.Result, and no Go error.
 func TestGetCommitsResolveError(t *testing.T) {
-	h := &handler{cfg: config.Default(), client: nil}
+	h := &handler{cfg: config.Default()}
 
 	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{Author: ""})
 	if err != nil {
@@ -122,6 +119,55 @@ func TestGetCommitsSuccess(t *testing.T) {
 		t.Fatal("expected Markdown TextContent in result")
 	}
 	if !strings.Contains(txt, "mendedlink") {
+		t.Errorf("rendered Markdown missing author; got:\n%s", txt)
+	}
+}
+
+func TestGetCommitsGitLabSuccess(t *testing.T) {
+	const payload = `[
+		{
+			"id": "abc123",
+			"message": "feat: add gitlab",
+			"author_name": "Mended Link",
+			"author_email": "mended@example.com",
+			"authored_date": "2026-05-29T12:00:00Z",
+			"web_url": "https://gitlab.example.com/skaphos/sting/-/commit/abc123"
+		}
+	]`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.EscapedPath(), "/projects/skaphos%2Fsting/repository/commits") {
+			http.Error(w, "unexpected path "+r.URL.EscapedPath(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.GitLabBaseURL = srv.URL + "/api/v4/"
+	h := &handler{cfg: cfg}
+
+	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Provider: "gitlab",
+		Author:   "mendedlink",
+		Scope:    "repos",
+		Repos:    []string{"skaphos/sting"},
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected non-error result, got %+v", res)
+	}
+	if mr.Provider != model.ProviderGitLab {
+		t.Errorf("Provider = %q, want gitlab", mr.Provider)
+	}
+	if mr.Count != 1 {
+		t.Errorf("Count = %d, want 1", mr.Count)
+	}
+	if txt := firstText(res); !strings.Contains(txt, "mendedlink") {
 		t.Errorf("rendered Markdown missing author; got:\n%s", txt)
 	}
 }

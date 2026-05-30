@@ -102,6 +102,9 @@ func TestCollectScopeSearch(t *testing.T) {
 	if res.Scope != model.ScopeSearch {
 		t.Errorf("Scope = %q", res.Scope)
 	}
+	if res.Provider != model.ProviderGitHub {
+		t.Errorf("Provider = %q, want github", res.Provider)
+	}
 	if res.Until.IsZero() {
 		t.Error("Until should be defaulted to now, got zero")
 	}

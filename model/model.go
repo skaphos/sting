@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Package model holds the domain types shared across the GitHub commit-query
-// tool. It is a leaf package with no internal dependencies so both the GitHub
-// client and the renderers can depend on it without creating import cycles.
+// Package model holds the domain types shared across commit-query providers.
+// It is a leaf package with no internal dependencies so provider clients and
+// renderers can depend on it without creating import cycles.
 package model
 
 import (
@@ -14,6 +14,24 @@ import (
 // shape they map from and detect drift. Bump it on any breaking change to
 // Result or Commit.
 const SchemaVersion = "sting.skaphos.io/v1"
+
+// Provider identifies the source control provider a query targets.
+type Provider string
+
+const (
+	ProviderGitHub Provider = "github"
+	ProviderGitLab Provider = "gitlab"
+)
+
+// Valid reports whether p is a recognized provider.
+func (p Provider) Valid() bool {
+	switch p {
+	case ProviderGitHub, ProviderGitLab:
+		return true
+	default:
+		return false
+	}
+}
 
 // Scope selects how commits are discovered for an author.
 type Scope string
@@ -40,8 +58,11 @@ func (s Scope) Valid() bool {
 
 // Query describes a single commit-retrieval request.
 type Query struct {
-	// Author is the GitHub login (or, for search, may be an email) whose
-	// commits are wanted.
+	// Provider is the source control provider to query.
+	Provider Provider
+	// Author is the provider author identifier whose commits are wanted. For
+	// GitHub this is a login (or, for search, may be an email). For GitLab this
+	// is matched against the commit author string.
 	Author string
 	// Since and Until bound the commit author date, inclusive. A zero Until
 	// means "now".
@@ -88,6 +109,7 @@ type Result struct {
 	// evidence-style provenance.
 	SchemaVersion string    `json:"schema_version"`
 	GeneratedAt   time.Time `json:"generated_at"`
+	Provider      Provider  `json:"provider,omitempty"`
 	Author        string    `json:"author"`
 	Scope         Scope     `json:"scope"`
 	Since         time.Time `json:"since"`

@@ -5,12 +5,11 @@ package mcpserver
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skaphos/sting/config"
-	"github.com/skaphos/sting/ghclient"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/internal/render"
 	"github.com/skaphos/sting/model"
 )
@@ -18,29 +17,25 @@ import (
 // GetCommitsInput is the argument schema for the get_commits tool. The
 // jsonschema descriptions are surfaced to the calling agent.
 type GetCommitsInput struct {
-	Author       string   `json:"author" jsonschema:"GitHub username (login) whose commits to retrieve"`
+	Provider     string   `json:"provider,omitempty" jsonschema:"source control provider: github (default) or gitlab"`
+	Author       string   `json:"author" jsonschema:"provider username or author string whose commits to retrieve"`
 	Since        string   `json:"since,omitempty" jsonschema:"start of window, RFC3339 or YYYY-MM-DD; if omitted, window is used"`
 	Until        string   `json:"until,omitempty" jsonschema:"end of window, RFC3339 or YYYY-MM-DD; defaults to now"`
 	Window       string   `json:"window,omitempty" jsonschema:"look-back window when since is omitted, e.g. 7d, 2w, 48h; defaults to the server default"`
 	Scope        string   `json:"scope,omitempty" jsonschema:"discovery scope: search (author search; global/public-only unless scoped by org or repos), repos (explicit repo list), or org (enumerate an org's repos; most complete for private orgs)"`
-	Repos        []string `json:"repos,omitempty" jsonschema:"owner/repo targets; required for scope=repos, and narrows scope=search to those repos (incl. private with access)"`
-	Org          string   `json:"org,omitempty" jsonschema:"organization login; required for scope=org, and scopes scope=search into that org (reaches private repos the token can access)"`
-	IncludeStats bool     `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions (extra API calls)"`
+	Repos        []string `json:"repos,omitempty" jsonschema:"repository/project targets; required for scope=repos, and narrows GitHub scope=search to those repos (incl. private with access)"`
+	Org          string   `json:"org,omitempty" jsonschema:"organization or GitLab group; required for scope=org, and scopes GitHub scope=search into that org (reaches private repos the token can access)"`
+	IncludeStats bool     `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions; GitHub uses extra API calls, GitLab uses commit-list stats"`
 }
 
 // handler holds the dependencies shared across tool calls.
 type handler struct {
-	cfg    config.Config
-	client *ghclient.Client
+	cfg config.Config
 }
 
 // New builds an MCP server exposing the get_commits tool, configured from cfg.
 func New(cfg config.Config) (*mcp.Server, error) {
-	client, err := ghclient.New(cfg.Token, cfg.BaseURL, cfg.PerPage)
-	if err != nil {
-		return nil, fmt.Errorf("build github client: %w", err)
-	}
-	h := &handler{cfg: cfg, client: client}
+	h := &handler{cfg: cfg}
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "sting",
@@ -49,10 +44,10 @@ func New(cfg config.Config) (*mcp.Server, error) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_commits",
-		Description: "Retrieve a GitHub user's commits over a time window. " +
+		Description: "Retrieve a GitHub or GitLab user's commits over a time window. " +
 			"Returns the commits as structured data plus a Markdown summary so " +
 			"you can describe what the person has been working on.",
-		// The tool only reads from the GitHub API; it never mutates anything.
+		// The tool only reads from provider APIs; it never mutates anything.
 		// OpenWorldHint is true because it reaches an external service.
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:  true,
@@ -75,13 +70,14 @@ func boolPtr(b bool) *bool { return &b }
 
 func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in GetCommitsInput) (*mcp.CallToolResult, model.Result, error) {
 	req := config.Request{
-		Author: in.Author,
-		Since:  in.Since,
-		Until:  in.Until,
-		Window: in.Window,
-		Scope:  in.Scope,
-		Repos:  in.Repos,
-		Org:    in.Org,
+		Provider: in.Provider,
+		Author:   in.Author,
+		Since:    in.Since,
+		Until:    in.Until,
+		Window:   in.Window,
+		Scope:    in.Scope,
+		Repos:    in.Repos,
+		Org:      in.Org,
 	}
 	if in.IncludeStats {
 		req.IncludeStats = &in.IncludeStats
@@ -92,7 +88,12 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 		return errorResult(err), model.Result{}, nil
 	}
 
-	result, err := h.client.Collect(ctx, q)
+	client, err := commitclient.New(h.cfg, q.Provider)
+	if err != nil {
+		return errorResult(err), model.Result{}, nil
+	}
+
+	result, err := client.Collect(ctx, q)
 	if err != nil {
 		return errorResult(err), model.Result{}, nil
 	}
