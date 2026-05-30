@@ -35,7 +35,7 @@ threshold_for_pkg() {
     "github.com/skaphos/sting/internal/cli")
       echo "60" ;;   # Active development on the init wizard; we will raise this as coverage improves
     "github.com/skaphos/sting/internal/credentials")
-      echo "73" ;;   # After switching to fully isolated own hosts.yml implementation (no GH_CONFIG_DIR mutation)
+      echo "72" ;;   # After switching to fully isolated own hosts.yml implementation (no GH_CONFIG_DIR mutation). macOS CI collects slightly lower due to skipped permission tests.
     *)
       echo "$default_threshold" ;;
   esac
