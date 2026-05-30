@@ -445,3 +445,133 @@ func TestListReportsKeyringMarkers(t *testing.T) {
 		t.Error("expected to see keyring marker entry with SourceKeyring in List()")
 	}
 }
+
+// --- Additional coverage for load/save error paths and marker logic ---
+
+// TestSaveInsecureHostsWriteError forces an error in saveInsecureHosts by
+// making the target directory unwritable after the store is created.
+func TestSaveInsecureHostsWriteError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; cannot test permission errors")
+	}
+
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	// Make the directory read-only (no write)
+	if err := os.Chmod(tmp, 0500); err != nil {
+		t.Fatalf("chmod failed: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(tmp, 0700) })
+
+	tok := Token{AccessToken: "will-fail-write"}
+	_, err := s.Save(context.Background(), ProviderGitHub, "github.com", tok, false)
+	if err == nil {
+		t.Error("expected error when saveInsecureHosts cannot write the file")
+	}
+}
+
+// TestLoadInsecureHosts_PermissionError exercises the read error path in loadInsecureHosts.
+func TestLoadInsecureHosts_PermissionError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root; cannot test permission errors")
+	}
+
+	tmp := t.TempDir()
+	hostsPath := filepath.Join(tmp, "hosts.yml")
+	// Create a valid file first
+	_ = os.WriteFile(hostsPath, []byte(`hosts: {}`), 0600)
+
+	// Remove read permission
+	if err := os.Chmod(hostsPath, 0000); err != nil {
+		t.Fatalf("chmod failed: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hostsPath, 0600) })
+
+	s := WithFilePath(tmp)
+
+	// Force reload to hit the permission error path
+	err := s.(*store).loadInsecureHosts()
+	if err == nil {
+		t.Error("expected error when hosts.yml is unreadable")
+	}
+}
+
+// TestLoadGitHubGHAuthFallbacks exercises the ghauth fallback branches in Load
+// (TokenForHost / TokenFromEnvOrConfig paths).
+func TestLoadGitHubGHAuthFallbacks(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	// Call Load for GitHub with no local credential. This will exercise
+	// the ghauth fallback code paths regardless of whether a token is found
+	// in the environment or gh config on this machine.
+	_, _, _ = s.Load(context.Background(), ProviderGitHub, "github.com")
+}
+
+// TestDeleteCleansEmptyComposite exercises the branch where Delete removes the
+// last fields from a composite and deletes the entry entirely.
+func TestDeleteCleansEmptyComposite(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	tok := Token{AccessToken: "to-delete"}
+	_, _ = s.Save(context.Background(), ProviderGitHub, "github.com", tok, false)
+
+	if err := s.Delete(context.Background(), ProviderGitHub, "github.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Access internal map for verification (acceptable in package test)
+	if s.(*store).hosts != nil {
+		if _, exists := s.(*store).hosts["github:github.com"]; exists {
+			t.Error("expected composite entry to be fully removed after Delete")
+		}
+	}
+}
+
+// succeedingKeyring is a test backend that always succeeds (simulates a working keyring).
+type succeedingKeyring struct{}
+
+func (succeedingKeyring) Set(service, user, secret string) error { return nil }
+func (succeedingKeyring) Get(service, user string) (string, error)     { return "fake-token-from-keyring", nil }
+func (succeedingKeyring) Delete(service, user string) error            { return nil }
+
+// TestSaveKeyringSuccessCreatesMarker exercises the keyring success path in Save,
+// including creation of the token-less marker and the (ignored) saveInsecureHosts call.
+func TestSaveKeyringSuccessCreatesMarker(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithKeyringForTest(succeedingKeyring{}, tmp)
+
+	tok := Token{
+		Type:        TokenTypeOAuth,
+		AccessToken: "real-secret",
+		Username:    "dave",
+	}
+
+	usedInsecure, err := s.Save(context.Background(), ProviderGitHub, "ghe.example.com", tok, false)
+	if err != nil {
+		t.Fatalf("Save with succeeding keyring failed: %v", err)
+	}
+	if usedInsecure {
+		t.Error("expected usedInsecure=false when keyring succeeded")
+	}
+
+	// Verify marker was created (no oauth_token, but user present)
+	refs, _ := s.List(context.Background())
+	found := false
+	for _, r := range refs {
+		if r.Host == "ghe.example.com" && r.Source == SourceKeyring && r.Username == "dave" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected keyring marker with SourceKeyring after successful keyring Save")
+	}
+
+	// Load should come from keyring (via the succeeding mock)
+	got, src, err := s.Load(context.Background(), ProviderGitHub, "ghe.example.com")
+	if err != nil || got.AccessToken != "fake-token-from-keyring" || src != SourceKeyring {
+		t.Errorf("Load after keyring success failed: got=%+v src=%s err=%v", got, src, err)
+	}
+}
