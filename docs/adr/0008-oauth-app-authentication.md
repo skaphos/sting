@@ -1,4 +1,4 @@
-# 7. OAuth App authentication and multi-provider credential storage
+# 8. OAuth App authentication and multi-provider credential storage
 
 ## Status
 

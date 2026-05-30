@@ -191,7 +191,7 @@ Sting requests the minimal scope needed (`read_api` for GitLab, `repo` + `read:o
 - This registration guide is being kept in sync with the code (see `sting auth gitlab --help` and the error messages for the latest instructions).
 
 See also:
-- [ADR 0007: OAuth App authentication and multi-provider credential storage](adr/0007-oauth-app-authentication.md)
+- [ADR 0008: OAuth App authentication and multi-provider credential storage](adr/0008-oauth-app-authentication.md)
 - Main README (authentication section will be updated when the feature is more widely announced)
 
 Feedback and improvements are welcome.
