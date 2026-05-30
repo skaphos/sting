@@ -50,6 +50,7 @@ func init() {
 	initCmd.AddCommand(initGitHubCmd)
 	initCmd.AddCommand(initGitLabCmd)
 
+	initCmd.RunE = runInit
 	initCmd.PersistentFlags().BoolVarP(&initYes, "yes", "y", false, "Non-interactive mode (assume yes to defaults)")
 }
 
