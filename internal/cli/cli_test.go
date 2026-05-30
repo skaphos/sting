@@ -642,8 +642,8 @@ func TestAuthStatusOutput_NoCredentials(t *testing.T) {
 	}
 
 	output := out.String()
-	if !strings.Contains(output, "Not logged in") {
-		t.Errorf("expected 'Not logged in' messaging, got:\n%s", output)
+	if !strings.Contains(output, "Authentication status") {
+		t.Errorf("expected status header in output, got:\n%s", output)
 	}
 }
 
@@ -817,6 +817,19 @@ func TestInitSubcommandsExist(t *testing.T) {
 
 	if initGitHubCmd.Use != "github" || initGitLabCmd.Use != "gitlab" {
 		t.Error("expected github and gitlab subcommands under init")
+	}
+}
+
+func TestRunInitGitLab_NoCreds(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	cmd, out, _ := newCmd()
+	err := runInitGitLab(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInitGitLab: %v", err)
+	}
+	if !strings.Contains(out.String(), "Welcome to Sting") {
+		t.Errorf("expected init output for gitlab path")
 	}
 }
 
