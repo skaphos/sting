@@ -1,0 +1,8 @@
+# Architecture Decision Records
+
+Short, immutable records of architecturally significant decisions for sting.
+Supersede an accepted record with a new one rather than rewriting it.
+
+- [0001 — Deliver MCP server and CLI from one binary](0001-mcp-and-cli-from-one-binary.md)
+- [0002 — Dedicated GitHub PAT via viper, separate from GITHUB_TOKEN](0002-dedicated-pat-via-viper.md)
+- [0003 — Multi-runtime MCP installer and read-only safety model](0003-multi-runtime-installer-and-readonly-safety.md)

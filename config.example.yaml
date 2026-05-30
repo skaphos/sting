@@ -1,0 +1,28 @@
+# sting configuration. Place at one of:
+#   $XDG_CONFIG_HOME/sting/config.yaml
+#   ~/.config/sting/config.yaml
+#   ~/.sting/config.yaml
+#   ./config.yaml
+# or point at any file with `sting --config path.yaml`.
+#
+# Every key can also be set via environment as STING_<KEY> (e.g. STING_TOKEN),
+# and the config-bearing keys via flags. Precedence: defaults < file < env < flag.
+
+# Dedicated GitHub PAT for sting. Kept separate from the ambient GITHUB_TOKEN so
+# this read-only token does not collide with other tools' credentials. A
+# classic PAT needs no scopes for public repos; add `repo` (read) for private.
+token: ""
+
+# GitHub Enterprise API root; empty means public github.com.
+base_url: ""
+
+# Defaults applied when a query omits the corresponding flag/argument.
+default_scope: search        # search | repos | org
+default_window: 7d           # look-back when --since is unset (e.g. 7d, 2w, 48h)
+default_repos: []            # owner/repo list used by scope=repos
+default_org: ""              # org login used by scope=org
+default_format: markdown     # markdown | json
+
+per_page: 100                # API page size (1-100)
+max_commits: 0               # cap on returned commits (0 = unlimited)
+include_stats: false         # fetch per-commit additions/deletions
