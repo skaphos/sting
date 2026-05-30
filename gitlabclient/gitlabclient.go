@@ -174,7 +174,13 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 			return nil, err
 		}
 		for _, gc := range commits {
-			out = append(out, fromCommit(repoLabel, gc))
+			cm := fromCommit(repoLabel, gc)
+			if q.IncludeFiles || q.IncludeDiffs {
+				if err := c.fillDiffDetails(ctx, project, repoLabel, &cm, q); err != nil {
+					return nil, err
+				}
+			}
+			out = append(out, cm)
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, nil
 			}
@@ -266,6 +272,18 @@ type gitlabCommit struct {
 type commitStats struct {
 	Additions int `json:"additions"`
 	Deletions int `json:"deletions"`
+	Total     int `json:"total"`
+}
+
+type gitlabDiff struct {
+	OldPath     string `json:"old_path"`
+	NewPath     string `json:"new_path"`
+	Diff        string `json:"diff"`
+	NewFile     bool   `json:"new_file"`
+	RenamedFile bool   `json:"renamed_file"`
+	DeletedFile bool   `json:"deleted_file"`
+	TooLarge    bool   `json:"too_large"`
+	Collapsed   bool   `json:"collapsed"`
 }
 
 func fromCommit(repo string, gc gitlabCommit) model.Commit {
@@ -287,6 +305,110 @@ func fromCommit(repo string, gc gitlabCommit) model.Commit {
 	if gc.Stats != nil {
 		cm.Additions = gc.Stats.Additions
 		cm.Deletions = gc.Stats.Deletions
+		cm.Changes = gc.Stats.Total
+		if cm.Changes == 0 {
+			cm.Changes = cm.Additions + cm.Deletions
+		}
 	}
 	return cm
+}
+
+func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string, cm *model.Commit, q model.Query) error {
+	endpoint := "projects/" + url.PathEscape(project) + "/repository/commits/" + url.PathEscape(cm.SHA) + "/diff"
+	values := url.Values{}
+	values.Set("per_page", strconv.Itoa(c.perPage))
+
+	var out []model.File
+	budget := q.MaxDiffBytes
+	if budget <= 0 {
+		budget = model.DefaultMaxDiffBytes
+	}
+	for page := 1; ; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var diffs []gitlabDiff
+		next, err := c.get(ctx, "get commit diff "+repoLabel+"@"+cm.SHA, endpoint, values, &diffs)
+		if err != nil {
+			return err
+		}
+		for _, gd := range diffs {
+			additions, deletions := countPatchLines(gd.Diff)
+			mf := model.File{
+				Path:         gd.NewPath,
+				PreviousPath: previousPath(gd),
+				Status:       diffStatus(gd),
+				Additions:    additions,
+				Deletions:    deletions,
+				Changes:      additions + deletions,
+			}
+			if mf.Path == "" {
+				mf.Path = gd.OldPath
+			}
+			if q.IncludeDiffs {
+				mf.Patch, mf.PatchTruncated, budget = consumePatchBudget(gd.Diff, budget)
+				mf.PatchTruncated = mf.PatchTruncated || gd.TooLarge || gd.Collapsed
+			} else if gd.TooLarge || gd.Collapsed {
+				mf.PatchTruncated = true
+			}
+			out = append(out, mf)
+		}
+		if next == "" {
+			break
+		}
+	}
+	cm.Files = out
+	if cm.Additions == 0 && cm.Deletions == 0 {
+		for _, f := range out {
+			cm.Additions += f.Additions
+			cm.Deletions += f.Deletions
+		}
+		cm.Changes = cm.Additions + cm.Deletions
+	}
+	return nil
+}
+
+func previousPath(gd gitlabDiff) string {
+	if gd.RenamedFile && gd.OldPath != gd.NewPath {
+		return gd.OldPath
+	}
+	return ""
+}
+
+func diffStatus(gd gitlabDiff) string {
+	switch {
+	case gd.NewFile:
+		return "added"
+	case gd.DeletedFile:
+		return "removed"
+	case gd.RenamedFile:
+		return "renamed"
+	default:
+		return "modified"
+	}
+}
+
+func countPatchLines(patch string) (additions, deletions int) {
+	for line := range strings.SplitSeq(patch, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			additions++
+		case strings.HasPrefix(line, "-"):
+			deletions++
+		}
+	}
+	return additions, deletions
+}
+
+func consumePatchBudget(patch string, budget int) (string, bool, int) {
+	if patch == "" {
+		return "", false, budget
+	}
+	if budget <= 0 {
+		return "", true, 0
+	}
+	if len(patch) <= budget {
+		return patch, false, budget - len(patch)
+	}
+	return patch[:budget], true, 0
 }

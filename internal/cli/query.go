@@ -31,6 +31,9 @@ func registerQueryFlags(cmd *cobra.Command) {
 	f.String("org", "", "organization login (scope=org)")
 	f.StringP("format", "o", "", "output format: markdown|json")
 	f.Bool("stats", false, "include per-commit additions/deletions")
+	f.Bool("files", false, "include per-file change summaries")
+	f.Bool("diffs", false, "include full file patches (implies --files)")
+	f.Int("max-diff-bytes", 0, "per-commit patch byte cap when --diffs is set (0 = config default)")
 }
 
 func runQuery(cmd *cobra.Command, _ []string) error {
@@ -69,6 +72,18 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 	if f.Changed("stats") {
 		stats, _ := f.GetBool("stats")
 		req.IncludeStats = &stats
+	}
+	if f.Changed("files") {
+		files, _ := f.GetBool("files")
+		req.IncludeFiles = &files
+	}
+	if f.Changed("diffs") {
+		diffs, _ := f.GetBool("diffs")
+		req.IncludeDiffs = &diffs
+	}
+	if f.Changed("max-diff-bytes") {
+		maxDiffBytes, _ := f.GetInt("max-diff-bytes")
+		req.MaxDiffBytes = &maxDiffBytes
 	}
 
 	q, err := cfg.Resolve(req, time.Now())

@@ -114,9 +114,31 @@ sting --provider gitlab --author mendedlink --scope org --org skaphos --window 2
 
 # Explicit bounds and per-commit line stats.
 sting --author mendedlink --since 2026-05-01 --until 2026-05-15 --stats
+
+# File-level evidence without full patches.
+sting --author mendedlink --scope repos --repos skaphos/sting --window 7d --files
+
+# Full bounded diffs for LLM analysis. This implies --files.
+sting --author mendedlink --scope repos --repos skaphos/sting --window 7d --diffs --max-diff-bytes 60000
 ```
 
 Run `sting --help` (or `sting <command> --help`) for the full flag list.
+
+### Evidence depth
+
+The default query returns commit metadata and messages only. Use the evidence
+flags when you want an agent to explain the actual code changes:
+
+- `--stats` adds per-commit additions, deletions, and total changed lines.
+- `--files` adds changed file paths, statuses, and per-file line counts.
+- `--diffs` adds patch text for each changed file and implies `--files`.
+- `--max-diff-bytes` caps patch text per commit; truncated files are marked in
+  JSON and Markdown.
+
+GitHub fetches this evidence from per-commit detail calls. GitLab uses
+`with_stats` for line stats and commit diff calls for file evidence. Keep full
+diffs explicit because they cost extra API calls and can be token-heavy for an
+LLM context.
 
 ### Scopes
 
@@ -184,6 +206,9 @@ directory, or pointed at explicitly with `--config path.yaml`.
 | `default_org`      | `STING_DEFAULT_ORG`     | (`--org`)            | —          | org/group for `org` scope                |
 | `default_format`   | `STING_DEFAULT_FORMAT`  | (`-o`)               | `markdown` | CLI output format                        |
 | `include_stats`    | `STING_INCLUDE_STATS`   | (`--stats`)          | `false`    | fetch additions/deletions per commit     |
+| `include_files`    | `STING_INCLUDE_FILES`   | (`--files`)          | `false`    | fetch changed file summaries             |
+| `include_diffs`    | `STING_INCLUDE_DIFFS`   | (`--diffs`)          | `false`    | fetch bounded patch text                 |
+| `max_diff_bytes`   | `STING_MAX_DIFF_BYTES`  | (`--max-diff-bytes`) | `60000`    | per-commit patch byte cap                |
 
 Keys in parentheses are per-query request flags that override the resolved
 default for a single invocation. See `config.example.yaml`.

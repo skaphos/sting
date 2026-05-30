@@ -51,6 +51,12 @@ type Config struct {
 	MaxCommits int `mapstructure:"max_commits"`
 	// IncludeStats fetches per-commit line stats by default.
 	IncludeStats bool `mapstructure:"include_stats"`
+	// IncludeFiles fetches per-file change summaries by default.
+	IncludeFiles bool `mapstructure:"include_files"`
+	// IncludeDiffs fetches bounded patch text by default.
+	IncludeDiffs bool `mapstructure:"include_diffs"`
+	// MaxDiffBytes caps patch text per commit when diffs are requested.
+	MaxDiffBytes int `mapstructure:"max_diff_bytes"`
 }
 
 // Defaults are the built-in configuration values, keyed by their canonical
@@ -71,6 +77,9 @@ func Defaults() map[string]any {
 		"per_page":        100,
 		"max_commits":     0,
 		"include_stats":   false,
+		"include_files":   false,
+		"include_diffs":   false,
+		"max_diff_bytes":  model.DefaultMaxDiffBytes,
 	}
 }
 
@@ -84,6 +93,9 @@ func Default() Config {
 		PerPage:         100,
 		MaxCommits:      0,
 		IncludeStats:    false,
+		IncludeFiles:    false,
+		IncludeDiffs:    false,
+		MaxDiffBytes:    model.DefaultMaxDiffBytes,
 	}
 }
 
@@ -97,6 +109,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return fmt.Errorf("per_page must be 1-100, got %d", cfg.PerPage)
+	}
+	if cfg.MaxDiffBytes < 0 {
+		return fmt.Errorf("max_diff_bytes must be >= 0, got %d", cfg.MaxDiffBytes)
 	}
 	if cfg.DefaultWindow != "" {
 		if _, err := ParseWindow(cfg.DefaultWindow); err != nil {

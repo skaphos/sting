@@ -35,6 +35,25 @@ const gitlabCommitsBody = `[
   }
 ]`
 
+const gitlabDiffBody = `[
+  {
+    "old_path": "README.md",
+    "new_path": "README.md",
+    "diff": "@@ -1 +1 @@\n-old\n+new\n",
+    "new_file": false,
+    "renamed_file": false,
+    "deleted_file": false
+  },
+  {
+    "old_path": "old.go",
+    "new_path": "new.go",
+    "diff": "@@ -1 +1 @@\n-old\n+new\n",
+    "new_file": false,
+    "renamed_file": true,
+    "deleted_file": false
+  }
+]`
+
 func TestCollectScopeRepos(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -87,9 +106,57 @@ func TestCollectScopeRepos(t *testing.T) {
 	if cm.Additions != 42 || cm.Deletions != 7 {
 		t.Errorf("Additions/Deletions = %d/%d, want 42/7", cm.Additions, cm.Deletions)
 	}
+	if cm.Changes != 49 {
+		t.Errorf("Changes = %d, want 49", cm.Changes)
+	}
 	wantDate := time.Date(2026, 5, 21, 11, 0, 0, 0, time.UTC)
 	if !cm.Date.Equal(wantDate) {
 		t.Errorf("Date = %v, want %v", cm.Date, wantDate)
+	}
+}
+
+func TestCollectIncludeFilesAndDiffs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch path := r.URL.EscapedPath(); {
+		case strings.Contains(path, "/projects/skaphos%2Fsting/repository/commits/abc123/diff"):
+			_, _ = w.Write([]byte(gitlabDiffBody))
+		case strings.Contains(path, "/projects/skaphos%2Fsting/repository/commits"):
+			_, _ = w.Write([]byte(gitlabCommitsBody))
+		default:
+			t.Errorf("unexpected path %q", path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:       "octocat",
+		Scope:        model.ScopeRepos,
+		Repos:        []string{"skaphos/sting"},
+		IncludeFiles: true,
+		IncludeDiffs: true,
+		MaxDiffBytes: 24,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	files := res.Commits[0].Files
+	if len(files) != 2 {
+		t.Fatalf("len(Files) = %d, want 2", len(files))
+	}
+	if files[0].Path != "README.md" || files[0].Status != "modified" {
+		t.Errorf("first file = %+v, want README.md modified", files[0])
+	}
+	if files[0].Additions != 1 || files[0].Deletions != 1 {
+		t.Errorf("first file stats = +%d/-%d, want +1/-1", files[0].Additions, files[0].Deletions)
+	}
+	if files[1].PreviousPath != "old.go" || files[1].Status != "renamed" {
+		t.Errorf("renamed file = %+v, want previous path old.go and status renamed", files[1])
+	}
+	if !files[1].PatchTruncated {
+		t.Errorf("second file PatchTruncated = false, want true after shared budget")
 	}
 }
 

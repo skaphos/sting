@@ -67,3 +67,11 @@ func TestValidateProvider(t *testing.T) {
 		t.Fatalf("Validate error = %q, want invalid provider", err)
 	}
 }
+
+func TestValidateMaxDiffBytes(t *testing.T) {
+	cfg := Default()
+	cfg.MaxDiffBytes = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate: want error for negative max diff bytes")
+	}
+}
