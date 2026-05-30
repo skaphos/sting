@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skaphos/sting/internal/config"
-	"github.com/skaphos/sting/internal/ghclient"
+	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/ghclient"
 	"github.com/skaphos/sting/internal/render"
 	"github.com/spf13/cobra"
 )

@@ -161,8 +161,8 @@ task run -- --author octocat --scope repos --repos octocat/Hello-World --since 2
 Package and API reference (godoc):
 
 ```sh
-go doc ./...                         # synopsis of every package
-go doc ./internal/ghclient Client    # a specific type
+go doc ./...                # synopsis of every package
+go doc ./ghclient Client    # a specific type
 ```
 
 ## Documentation
@@ -174,15 +174,23 @@ go doc ./internal/ghclient Client    # a specific type
 
 ## Layout
 
+Public packages (importable; the evidence contract — see
+[ADR 0004](docs/adr/0004-public-packages-and-wake-evidence.md)):
+
+```
+model/                domain types (leaf) + Result SchemaVersion
+config/               Config, viper keys, window/time parsing, query resolution
+ghclient/             go-github wrapper + scope dispatch + normalization
+```
+
+Application layer (internal):
+
 ```
 cmd/sting/            thin entrypoint -> internal/cli
 internal/cli/         cobra command tree + viper wiring
-internal/config/      Config, viper keys, window/time parsing, query resolution
-internal/ghclient/    go-github wrapper + scope dispatch + normalization
 internal/render/      JSON + Markdown rendering
 internal/mcpserver/   MCP server; read-only get_commits tool
 internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)
-internal/model/       domain types (leaf)
 ```
 
 [viper]: https://github.com/spf13/viper

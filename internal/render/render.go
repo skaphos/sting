@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 // Format identifies an output encoding.

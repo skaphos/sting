@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 func TestResolveDefaults(t *testing.T) {

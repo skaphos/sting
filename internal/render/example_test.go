@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/skaphos/sting/internal/model"
 	"github.com/skaphos/sting/internal/render"
+	"github.com/skaphos/sting/model"
 )
 
 // ExampleMarkdown renders a query result as a Markdown report grouped by

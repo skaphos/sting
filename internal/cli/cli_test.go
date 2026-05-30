@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skaphos/sting/internal/config"
+	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/internal/mcpinstall"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v82/github"
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 func TestAPIErrorClassification(t *testing.T) {

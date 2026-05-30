@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// SchemaVersion identifies the sting Result contract. It is emitted on every
+// Result so downstream consumers (e.g. a Wake evidence adapter) can pin the
+// shape they map from and detect drift. Bump it on any breaking change to
+// Result or Commit.
+const SchemaVersion = "sting.skaphos.io/v1"
+
 // Scope selects how commits are discovered for an author.
 type Scope string
 
@@ -77,11 +83,16 @@ func (c Commit) Summary() string {
 // Result is the outcome of a Query: the matching commits plus the parameters
 // that produced them, suitable for direct serialization.
 type Result struct {
-	Author    string    `json:"author"`
-	Scope     Scope     `json:"scope"`
-	Since     time.Time `json:"since"`
-	Until     time.Time `json:"until"`
-	Count     int       `json:"count"`
-	Commits   []Commit  `json:"commits"`
-	Truncated bool      `json:"truncated,omitempty"` // true if MaxCommits clipped results
+	// SchemaVersion pins the Result contract (see the package SchemaVersion
+	// constant). GeneratedAt records when the query ran, giving the result
+	// evidence-style provenance.
+	SchemaVersion string    `json:"schema_version"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	Author        string    `json:"author"`
+	Scope         Scope     `json:"scope"`
+	Since         time.Time `json:"since"`
+	Until         time.Time `json:"until"`
+	Count         int       `json:"count"`
+	Commits       []Commit  `json:"commits"`
+	Truncated     bool      `json:"truncated,omitempty"` // true if MaxCommits clipped results
 }

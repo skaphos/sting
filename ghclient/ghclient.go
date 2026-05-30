@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v82/github"
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 // apiError wraps a go-github error, giving rate-limit failures a clearer,
@@ -96,13 +96,15 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 
 	return model.Result{
-		Author:    q.Author,
-		Scope:     q.Scope,
-		Since:     q.Since,
-		Until:     q.Until,
-		Count:     len(commits),
-		Commits:   commits,
-		Truncated: truncated,
+		SchemaVersion: model.SchemaVersion,
+		GeneratedAt:   time.Now(),
+		Author:        q.Author,
+		Scope:         q.Scope,
+		Since:         q.Since,
+		Until:         q.Until,
+		Count:         len(commits),
+		Commits:       commits,
+		Truncated:     truncated,
 	}, nil
 }
 
