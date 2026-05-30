@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sting": {
+      "command": "/usr/local/bin/sting",
+      "args": ["mcp"]
+    }
+  }
+}

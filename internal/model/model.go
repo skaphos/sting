@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package model holds the domain types shared across the GitHub commit-query
 // tool. It is a leaf package with no internal dependencies so both the GitHub
 // client and the renderers can depend on it without creating import cycles.

@@ -1,0 +1,4 @@
+[mcp_servers.other]
+command = "/bin/other"
+args = ["run"]
+enabled = true

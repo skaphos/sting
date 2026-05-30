@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Package mcpserver exposes the commit-query capability as an MCP tool over a
 // stdio transport, so an LLM agent can ask for an author's recent commits.
 package mcpserver

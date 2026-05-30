@@ -1,0 +1,9 @@
+version = 1
+SPDX-PackageName = "sting"
+SPDX-PackageDownloadLocation = "https://github.com/skaphos/sting"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Skaphos"
+SPDX-License-Identifier = "MIT"
