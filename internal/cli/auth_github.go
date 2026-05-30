@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/atotto/clipboard"
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -20,8 +21,18 @@ var authGitHubCmd = &cobra.Command{
 	Long: `Start the OAuth flow to authenticate with GitHub (recommended).
 
 Official Skaphos/Sting OAuth App credentials are included, so this works out of the box
-for github.com (and can be used with --hostname for GitHub Enterprise Server if you
-register a matching OAuth App on your instance).
+for github.com.
+
+GitHub Enterprise Server (GHES):
+  Use --hostname to target your enterprise instance.
+  You will almost always need to register your own OAuth App on that GHES instance
+  and pass the credentials using --client-id / --client-secret (or the corresponding
+  environment variables).
+
+  Example:
+    sting auth github --hostname ghe.example.com \
+      --client-id YOUR_GHES_CLIENT_ID \
+      --client-secret YOUR_GHES_CLIENT_SECRET
 
 By default uses the device authorization flow (no browser required on the machine running sting).
 Use --web to force the browser-based flow instead.
@@ -79,6 +90,27 @@ func runAuthGitHub(cmd *cobra.Command, _ []string) error {
 	}
 	if clientSecret == "" {
 		clientSecret = "6b0e3062797258cdc9fcc80ce5b7774be2d4d0a2"
+	}
+
+	// GHES guidance: if the user is targeting a non-github.com host and is still
+	// using the default public credentials, give a clear, actionable error.
+	isEnterprise := hostname != "github.com" && !strings.HasSuffix(hostname, ".github.com")
+	usingDefaultCreds := (authGitHubClientID == "" && os.Getenv("STING_GITHUB_CLIENT_ID") == "") &&
+		(authGitHubClientSecret == "" && os.Getenv("STING_GITHUB_CLIENT_SECRET") == "")
+
+	if isEnterprise && usingDefaultCreds {
+		return fmt.Errorf(`GitHub Enterprise Server detected (%s).
+
+The built-in Skaphos credentials only work against github.com.
+
+You need to register an OAuth App on your GHES instance and provide its credentials:
+
+  sting auth github --hostname %s \
+    --client-id YOUR_CLIENT_ID \
+    --client-secret YOUR_CLIENT_SECRET
+
+See the documentation for the exact settings (enable Device Flow, callback http://127.0.0.1/callback).`,
+			hostname, hostname)
 	}
 
 	// Set up the OAuth flow (same library gh uses)
