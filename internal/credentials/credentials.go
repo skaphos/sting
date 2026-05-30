@@ -1,14 +1,21 @@
 // Package credentials provides secure (preferred) + plaintext (fallback)
 // storage for Sting authentication material.
 //
-// It follows the storage standards and patterns established by the official
-// GitHub CLI (gh) as closely as possible:
-//   - Secure storage via the same zalando/go-keyring wrapper pattern.
-//   - Insecure fallback uses our own implementation writing to
-//     ~/.config/sting/hosts.yml using the same logical "hosts" structure.
-//     We deliberately do NOT use github.com/cli/go-gh/v2/pkg/config
-//     because it only supports configuration via the GH_CONFIG_DIR
-//     environment variable, which is too risky for isolation guarantees.
+// # Isolation Guarantee
+//
+// This package is deliberately isolated from the user's real GitHub CLI (gh)
+// configuration:
+//
+//   - We never mutate the GH_CONFIG_DIR environment variable.
+//   - We never use github.com/cli/go-gh/v2/pkg/config for writing credentials.
+//     (That package only supports configuration via GH_CONFIG_DIR, which
+//     creates too much risk of accidental leakage or corruption of
+//     ~/.config/gh during development, testing, or error conditions.)
+//   - All insecure (plaintext) credential storage is written exclusively
+//     to ~/.config/sting/hosts.yml using our own minimal implementation.
+//
+// The design follows the same logical "hosts.<composite>" structure that gh
+// uses for familiarity, but everything under Sting's own directory.
 //
 // This package is intentionally internal. The public config package remains
 // focused on query defaults and does not grow auth token concerns.
