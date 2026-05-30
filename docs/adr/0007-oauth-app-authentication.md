@@ -57,6 +57,7 @@ Support for classic Personal Access Tokens (PATs) is retained, but **strictly as
 - Support "bring your own" OAuth App credentials, especially important for:
   - GitHub Enterprise Server (where apps are registered per instance).
   - Organizations that prefer their own registered app on GitHub.com or GitLab.
+- A small amount of new configuration surface will be added later for custom `client_id` / `client_secret` per provider/host (see open question 6 in the credential storage spike).
 - Update `internal/commitclient` and the MCP server path to obtain tokens via the new credential layer. The layer must support both OAuth tokens and legacy PATs, with clear precedence rules that treat OAuth as preferred when both are present for the same provider/host.
 - Document the full registration process for both GitHub.com / GitLab.com and self-hosted GHES / GitLab instances so teams can use their own apps.
 - Evolve (but do not break) the dedicated-credential philosophy from ADR 0002. OAuth tokens become the primary "sting's own" credentials. Legacy PAT configuration remains fully functional as a fallback but must be presented and documented as such.

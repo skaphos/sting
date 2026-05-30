@@ -137,65 +137,59 @@ func WithKeyring(backend KeyringBackend) Store
 
 This ensures that once a user successfully runs `sting auth github`, future operations prefer the OAuth token even if a legacy `token:` still exists in their config.
 
-## Open Design Questions
+## Open Design Questions — **LOCKED DECISIONS** (2026-05-30)
 
-1. **File format for plaintext fallback**  
-   - JSON? (simple, but secrets in cleartext file)  
-   - Encrypted with a machine-local key? (adds complexity)  
-   - Same format gh uses? (we should investigate `go-gh` credential file format)
+All questions have been reviewed and confirmed. These are now final for implementation.
 
-2. **Keyring library choice**  
-   **Use `github.com/zalando/go-keyring`** (the exact one gh depends on and wraps).  
-   We will copy gh's timeout wrapper + mock helpers into `internal/keyring` for robustness and testability.  
-   Do **not** use 99designs/keyring or other alternatives — the goal is to follow gh's storage standards as closely as possible.
+### 1. File format for plaintext fallback — **LOCKED**
 
-3. **Migration from existing config**  
-   - On first `auth status` or `init`, should we detect legacy `token` / `gitlab_token` and offer to migrate them into the new store?
-   - Or treat them as read-only legacy sources forever?
+**Final Decision:** Use **`github.com/cli/go-gh/v2/pkg/config`** (the exact library and format gh uses) for all insecure/plaintext credential storage.
 
-4. **Per-user vs per-host for GHES**  
-   GHES often has one hostname but many users. Do we need `(provider, host, username)` as the key, or is `(provider, host)` + active user sufficient? (gh moved to multi-user support; we may want to keep it simpler initially).
+- Insecure fallback will live in Sting's config directory using the `hosts.<hostname>.oauth_token` structure (and multi-user variant).
+- Same `0600` permissions and split `config.yml` / `hosts.yml` behavior as gh.
+- Confirmed via direct inspection of `go-gh/pkg/config/config.go`.
 
-5. **Environment variable precedence**  
-   Should `STING_TOKEN` / `STING_GITLAB_TOKEN` still win over stored credentials (current viper behavior), or should stored OAuth tokens take priority?
+### 2. Keyring library choice — **LOCKED**
 
-6. **"Bring your own OAuth client" configuration**  
-   This is related but slightly separate. We probably need a small sidecar concept for custom `client_id` / `client_secret` per host.
+Use `github.com/zalando/go-keyring` exactly as gh does.
+- Copy gh's timeout wrapper + `MockInit` helpers into `internal/keyring`.
+- No other keyring libraries.
 
-## Recommended Approach: Follow gh Libraries and Standards (No Reinvention)
+### 3. Migration from existing config — **LOCKED**
 
-Per direction, we should **not** invent our own storage mechanism. Instead, closely follow the proven libraries and patterns established by the official GitHub CLI:
+- No auto-migration.
+- Legacy `token` / `gitlab_token` (from current viper/config) are treated as **read-only legacy sources**.
+- On `auth status` and in messaging, clearly distinguish old config sources vs new credential store.
+- Explicit migration can be offered later via `auth` or `init` commands if desired.
+- **Context**: This is accurate because there are currently no production installs of Sting.
 
-### Core Libraries to Depend On
+### 4. Per-user vs per-host for GHES — **LOCKED**
 
-- **`github.com/zalando/go-keyring`** — The exact library gh uses (wrapped with timeouts + mocks in their `internal/keyring`).
-  - Add a similar thin wrapper in `internal/keyring` for timeout protection and test mocking (copy the pattern from cli/cli).
-- **`github.com/cli/go-gh/v2/pkg/config`** — For reading and writing the configuration file in the exact same format gh uses (`hosts.<host>.oauth_token`, users, etc.).
-  - This gives us interoperability potential and follows the "standard" file layout.
+Follow gh's model exactly:
+- Primary keying is `(provider, host)` + active user slot.
+- Retain the full multi-user structure (`users.<user>`) from day one because we are using go-gh's config format.
+- "One active credential per host" is the initial UX; full multi-account switching can be added later.
 
-### Storage Standard (from gh)
+### 5. Environment variable precedence — **LOCKED**
 
-- **Keyring service name**: `"gh:" + hostname` (see `internal/config/config.go:keyringServiceName`).
-  - For Sting we can use `"sting:" + hostname` or `"sting:<provider>:<host>"` to namespace cleanly while still being recognizable.
-- **Keyring user key**: username (or empty string for the "active" slot).
-- **Insecure fallback**: Write under `hosts.<hostname>.oauth_token` (and the multi-user `users.<user>.oauth_token` structure) using go-gh's config package.
-- **Login flow logic**: Mirror `AuthConfig.Login` / `ActiveToken` / `Logout` from gh's `internal/config/config.go` and `internal/gh`.
+- `STING_TOKEN` / `STING_GITLAB_TOKEN` (and corresponding flags) retain highest priority for explicit override (preserves CI/automation expectations and ADR 0002).
+- Among *stored* credentials, OAuth tokens take precedence over legacy PATs.
+- Document clearly in `auth status`.
 
-### Benefits of This Approach
+### 6. "Bring your own OAuth client" configuration — **LOCKED (keys TBD)**
 
-- Battle-tested secure + insecure fallback behavior with clear messaging.
-- Same UX patterns users already know from `gh` (`keyring` vs `oauth_token` source in status).
-- Easy to support reading tokens that were stored by `gh` (or vice versa) in the future.
-- We get the multi-user-per-host support almost for free if we follow the same structure.
-- Testability via their mock keyring helpers.
+Supported use case (especially important for GHES).
+- A small new configuration surface will be added for custom `client_id` / `client_secret` per provider/host.
+- Exact key names and structure will be decided by the user during the documentation + implementation loop.
+- Noted in ADR 0007 and the registration guide.
 
-### Updated Spike Recommendation
+---
 
-The proposed `Store` interface above is still good as our **Sting-specific abstraction** (it adds the multi-provider + PAT fallback + precedence rules that gh doesn't have).
+**All open design questions have now been addressed above with proposed resolutions.**
 
-The **implementation** of that interface should be a thin layer on top of:
-- `go-gh` config for the file side
-- `zalando/go-keyring` (via our wrapper) for the secure side
+The "Recommended Approach" (follow gh's zalando/go-keyring + go-gh/pkg/config exactly) remains the guiding principle for implementation.
+
+Next step after review: Lock these decisions, update ADR 0007 with any final implications, then begin the first implementation slice (adding the dependencies + the keyring wrapper + a working `credentials.Store` implementation).
 
 This is the "use the libs and standards" path.
 
@@ -210,4 +204,44 @@ Do **not** reach for `99designs/keyring` — stick to zalando to match gh exactl
 
 ---
 
-*This document is a living design artifact on `feature/ska-466`. It will be superseded by the implementation and the final ADR once the interface stabilizes.*
+**Status**: All open design questions locked (2026-05-30). Ready for implementation.
+
+---
+
+## Leveraging go-gh Components (Ongoing Strategy)
+
+As we continue implementation, we are deliberately maximizing reuse of `github.com/cli/go-gh/v2` to minimize custom code and third-party dependencies in Sting.
+
+### Current Usage
+
+- **`pkg/config`** — Fully wired for insecure (plaintext) credential storage. We use the standard `hosts.<composite>.oauth_token` structure and benefit from its file handling, multi-user support, and `Write()` semantics. This replaced our earlier ad-hoc JSON approach.
+
+### In Progress / Next
+
+- **`pkg/auth`** — Being integrated into `Load()` (at least for GitHub providers).
+  - `auth.TokenFromEnvOrConfig(host)` gives us GitHub-aware env var + config file reading (with proper normalization and tenancy handling).
+  - `auth.TokenForHost(host)` additionally tries the system keyring by shelling out to `gh auth token --secure-storage` when `gh` is installed.
+  - This provides excellent compatibility: if a user is already logged into GitHub via the official `gh` CLI, Sting can discover those tokens without forcing re-authentication in many cases.
+  - For GitLab we continue using our own logic (go-gh is GitHub-focused).
+
+### Future Opportunities (When Implementing `auth` Login Commands)
+
+- **`pkg/browser`** — Use instead of directly depending on `github.com/cli/browser`. Gives us free support for `GH_BROWSER` env var and config file settings.
+- **`pkg/prompter`** — Use for interactive prompts (`Select`, `Input`, `Password`, `Confirm`) during `sting auth github` / `init`. High-quality wrapper around survey with proper stdio handling.
+- **`pkg/api`** — For post-login operations (e.g. fetching the current user after OAuth completes, or making GraphQL queries). The authenticated clients here already know how to attach tokens via the auth package.
+
+### What go-gh Does *Not* Replace
+
+- We still need our own `internal/keyring` wrapper (based on `zalando/go-keyring`) because:
+  - We need to *write* tokens during `auth login`.
+  - We support GitLab (go-gh is GitHub-only).
+  - We want native secure storage without requiring the `gh` binary to be present.
+- The core `credentials.Store` abstraction and multi-provider logic remain Sting-specific.
+
+### Guiding Principle Going Forward
+
+When adding new functionality in the auth flow (especially the login commands), default to asking: "Can this be done with something already in go-gh?" before pulling in new direct dependencies or writing custom prompt/browser/auth logic.
+
+This keeps our dependency footprint cleaner and makes Sting feel more consistent with the official GitHub CLI experience where it makes sense.
+
+*This section will be expanded as we adopt more pieces during implementation.*

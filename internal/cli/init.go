@@ -42,9 +42,13 @@ var initGitLabCmd = &cobra.Command{
 	RunE:  runInitGitLab,
 }
 
+var initYes bool
+
 func init() {
 	initCmd.AddCommand(initGitHubCmd)
 	initCmd.AddCommand(initGitLabCmd)
+
+	initCmd.PersistentFlags().BoolVarP(&initYes, "yes", "y", false, "Non-interactive mode (assume yes to defaults)")
 }
 
 func runInit(cmd *cobra.Command, _ []string) error {
@@ -82,6 +86,7 @@ func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 			fmt.Fprintln(out, "      (GitLab credentials also present)")
 		}
 		ensureDefaultProvider("github")
+		printFinalSummary(out)
 		return offerInstall(cmd, out, in)
 	}
 
@@ -89,15 +94,40 @@ func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 		fmt.Fprintln(out, "✓ GitLab credentials found.")
 		fmt.Fprintln(out, "Note: Sting defaults to GitHub. You can also set up GitHub with `sting init github`.")
 		ensureDefaultProvider("gitlab")
+		printFinalSummary(out)
 		return offerInstall(cmd, out, in)
 	}
 
-	// Need to set up the chosen provider
+	// Fresh setup for this provider
+	if !initYes {
+		fmt.Fprintln(out, "No credentials found yet for this provider.")
+		fmt.Fprintln(out, "Would you like to authenticate now? [Y/n]")
+		if prompt(in) == "n" {
+			fmt.Fprintln(out, "\nYou can run it later with:")
+			if provider == credentials.ProviderGitHub {
+				fmt.Fprintln(out, "  sting auth github")
+			} else {
+				fmt.Fprintln(out, "  sting auth gitlab")
+			}
+			printFinalSummary(out)
+			return nil
+		}
+	}
+
+	// Proceed with auth wizard
 	if provider == credentials.ProviderGitHub {
 		return runGitHubAuthWizard(cmd, out, in)
 	} else {
 		return runGitLabAuthWizard(cmd, out, in)
 	}
+}
+
+func printFinalSummary(out io.Writer) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "All set!")
+	fmt.Fprintln(out, "Next steps:")
+	fmt.Fprintln(out, "  sting query --author YOUR_USERNAME")
+	fmt.Fprintln(out, "  sting install          # optional: register with your agents")
 }
 
 func prompt(in *bufio.Reader) string {
@@ -118,7 +148,11 @@ func runGitHubAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 	authGitHubClientSecret = ""
 
 	if err := runAuthGitHub(cmd, nil); err != nil {
-		return err
+		fmt.Fprintln(out, "\nGitHub authentication was not completed.")
+		fmt.Fprintln(out, "You can try again later with: sting auth github")
+		ensureDefaultProvider("github")
+		printFinalSummary(out)
+		return nil // graceful - don't fail the whole init
 	}
 
 	// Re-check and give strong success message
@@ -129,12 +163,13 @@ func runGitHubAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 			fmt.Fprintln(out, "\n✓ GitHub authentication successful!")
 			ensureDefaultProvider("github")
 			fmt.Fprintln(out, "GitHub is now your default provider.")
-			fmt.Fprintln(out, "Try:  sting query --author YOUR_GITHUB_HANDLE")
+			printFinalSummary(out)
 			return offerInstall(cmd, out, in)
 		}
 	}
 
 	ensureDefaultProvider("github")
+	printFinalSummary(out)
 	return offerInstall(cmd, out, in)
 }
 
@@ -152,7 +187,11 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 	authGitLabInsecure = false
 
 	if err := runAuthGitLab(cmd, nil); err != nil {
-		return err
+		fmt.Fprintln(out, "\nGitLab authentication was not completed.")
+		fmt.Fprintln(out, "You can try again later with: sting auth gitlab")
+		ensureDefaultProvider("gitlab")
+		printFinalSummary(out)
+		return nil
 	}
 
 	// Re-check
@@ -163,11 +202,13 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 			fmt.Fprintln(out, "\n✓ GitLab authentication successful!")
 			ensureDefaultProvider("gitlab")
 			fmt.Fprintln(out, "Note: GitHub is still the default. You can change it with `sting init github` if needed.")
+			printFinalSummary(out)
 			return offerInstall(cmd, out, in)
 		}
 	}
 
 	ensureDefaultProvider("gitlab")
+	printFinalSummary(out)
 	return offerInstall(cmd, out, in)
 }
 
@@ -195,6 +236,13 @@ func ensureDefaultProvider(provider string) {
 
 // offerInstall asks the user if they want to register Sting with their agent runtimes.
 func offerInstall(cmd *cobra.Command, out io.Writer, in *bufio.Reader) error {
+	if initYes {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "To register Sting with your agents later, run:")
+		fmt.Fprintln(out, "  sting install")
+		return nil
+	}
+
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Would you like to register Sting with your agent runtimes now? (Claude, Codex, etc.) [Y/n]")
 	answer := prompt(in)
