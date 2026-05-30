@@ -20,6 +20,6 @@ var authCmd = &cobra.Command{
 func init() {
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authGitHubCmd)
+	authCmd.AddCommand(authLogoutCmd)
 	// TODO (GitLab later): authCmd.AddCommand(authGitLabCmd)
-	// TODO: authCmd.AddCommand(authLogoutCmd)
 }
