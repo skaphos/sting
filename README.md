@@ -1,7 +1,7 @@
 # sting
 
-Query a GitHub user's commits over a time window and hand them to an LLM agent
-(or a terminal) in a consumable form.
+Query a GitHub or GitLab user's commits over a time window and hand them to an
+LLM agent (or a terminal) in a consumable form.
 
 `sting` is a single binary with subcommands:
 
@@ -13,8 +13,8 @@ Query a GitHub user's commits over a time window and hand them to an LLM agent
   with your agent runtimes (Claude Code, Codex, OpenCode, Grok).
 
 Configuration is resolved with [viper] (`defaults < config file < env < flags`),
-so a dedicated read-only PAT can live in sting's own config instead of relying
-on the ambient `GITHUB_TOKEN`.
+so dedicated read-only PATs can live in sting's own config instead of relying on
+ambient provider tokens.
 
 ## Install
 
@@ -26,9 +26,11 @@ task build      # -> ./bin/sting
 
 ## Authentication
 
+### GitHub
+
 sting uses its **own** token key, deliberately separate from `GITHUB_TOKEN` so a
-dedicated read-only PAT does not collide with other tools. Set it in the config
-file (`token:`) or via `STING_TOKEN`:
+dedicated read-only GitHub PAT does not collide with other tools. Set it in the
+config file (`token:`) or via `STING_TOKEN`:
 
 ```sh
 # config file (recommended): ~/.config/sting/config.yaml
@@ -41,6 +43,27 @@ export STING_TOKEN=ghp_xxx
 Unauthenticated calls work for public data but are heavily rate limited (global
 commit search is ~10 requests/min without a token). A classic PAT needs no scopes
 for public repos; add read `repo` access to include private repos.
+
+### GitLab
+
+GitLab uses a separate token key, deliberately separate from both the GitHub
+token and ambient GitLab environment variables. Set it in the config file
+(`gitlab_token:`) or via `STING_GITLAB_TOKEN`:
+
+```sh
+# config file (recommended): ~/.config/sting/config.yaml
+gitlab_token: glpat_xxx
+
+# or environment
+export STING_GITLAB_TOKEN=glpat_xxx
+```
+
+GitLab.com is the default. For self-managed GitLab, point `gitlab_base_url` (or
+`STING_GITLAB_BASE_URL`) at the API v4 root, for example:
+
+```yaml
+gitlab_base_url: https://gitlab.example.com/api/v4/
+```
 
 ## Agent integration (the main use case)
 
@@ -83,6 +106,12 @@ sting --author mendedlink --scope repos --repos skaphos/sting,skaphos/other
 # Across every repo in an org.
 sting --author mendedlink --scope org --org skaphos --window 2w
 
+# GitLab project commits.
+sting --provider gitlab --author mendedlink --scope repos --repos skaphos/sting
+
+# GitLab group commits, including projects in subgroups.
+sting --provider gitlab --author mendedlink --scope org --org skaphos --window 2w
+
 # Explicit bounds and per-commit line stats.
 sting --author mendedlink --since 2026-05-01 --until 2026-05-15 --stats
 ```
@@ -91,11 +120,17 @@ Run `sting --help` (or `sting <command> --help`) for the full flag list.
 
 ### Scopes
 
-| scope    | how it finds commits                                              | notes                                              |
-|----------|------------------------------------------------------------------|----------------------------------------------------|
-| `search` | GitHub commit search by `author:`                                | global (public-only) unless scoped; 1000-result cap |
-| `repos`  | lists commits in each `owner/repo` you name, filtered by author  | most complete; supports private repos with a token |
-| `org`    | enumerates an org's repos, then lists commits in each            | needs org read access for private repos            |
+| provider | scope    | how it finds commits                                             | notes                                               |
+|----------|----------|------------------------------------------------------------------|-----------------------------------------------------|
+| GitHub   | `search` | GitHub commit search by `author:`                                | global (public-only) unless scoped; 1000-result cap |
+| GitHub   | `repos`  | lists commits in each `owner/repo` you name, filtered by author  | most complete; supports private repos with a token  |
+| GitHub   | `org`    | enumerates an org's repos, then lists commits in each            | needs org read access for private repos             |
+| GitLab   | `repos`  | lists commits in each `group/project` or project ID              | supports nested group paths; GitLab search not used |
+| GitLab   | `org`    | treats `org` as a GitLab group and includes subgroup projects     | needs group/project read access for private data    |
+
+GitLab `search` scope is not supported yet. GitLab's search API does not map
+cleanly to sting's date-bounded author query contract, so use `repos` or `org`
+with `--provider gitlab`.
 
 #### Searching private orgs
 
@@ -134,18 +169,21 @@ Resolved in increasing precedence: built-in defaults → config file → environ
 `$XDG_CONFIG_HOME/sting`, `~/.config/sting`, `~/.sting`, or the current
 directory, or pointed at explicitly with `--config path.yaml`.
 
-| key              | env                   | flag           | default    | meaning                                  |
-|------------------|-----------------------|----------------|------------|------------------------------------------|
-| `token`          | `STING_TOKEN`         | `--token`      | —          | dedicated GitHub PAT                      |
-| `base_url`       | `STING_BASE_URL`      | `--base-url`   | github.com | GitHub Enterprise API root               |
-| `per_page`       | `STING_PER_PAGE`      | `--per-page`   | `100`      | API page size (1–100)                    |
-| `max_commits`    | `STING_MAX_COMMITS`   | `--max-commits`| `0`        | cap on returned commits (0 = unlimited)  |
-| `default_scope`  | `STING_DEFAULT_SCOPE` | (`--scope`)    | `search`   | scope when unspecified                   |
-| `default_window` | `STING_DEFAULT_WINDOW`| (`--window`)   | `7d`       | look-back when `since` unspecified       |
-| `default_repos`  | `STING_DEFAULT_REPOS` | (`--repos`)    | —          | `owner/repo` list for `repos` scope      |
-| `default_org`    | `STING_DEFAULT_ORG`   | (`--org`)      | —          | org for `org` scope                      |
-| `default_format` | `STING_DEFAULT_FORMAT`| (`-o`)         | `markdown` | CLI output format                        |
-| `include_stats`  | `STING_INCLUDE_STATS` | (`--stats`)    | `false`    | fetch additions/deletions per commit     |
+| key                | env                     | flag                 | default    | meaning                                  |
+|--------------------|-------------------------|----------------------|------------|------------------------------------------|
+| `provider`         | `STING_PROVIDER`        | (`--provider`)       | `github`   | provider when unspecified                |
+| `token`            | `STING_TOKEN`           | `--token`            | —          | dedicated GitHub PAT                     |
+| `base_url`         | `STING_BASE_URL`        | `--base-url`         | github.com | GitHub Enterprise API root               |
+| `gitlab_token`     | `STING_GITLAB_TOKEN`    | `--gitlab-token`     | —          | dedicated GitLab PAT                     |
+| `gitlab_base_url`  | `STING_GITLAB_BASE_URL` | `--gitlab-base-url`  | GitLab.com | GitLab API v4 root                       |
+| `per_page`         | `STING_PER_PAGE`        | `--per-page`         | `100`      | API page size (1–100)                    |
+| `max_commits`      | `STING_MAX_COMMITS`     | `--max-commits`      | `0`        | cap on returned commits (0 = unlimited)  |
+| `default_scope`    | `STING_DEFAULT_SCOPE`   | (`--scope`)          | `search`   | scope when unspecified                   |
+| `default_window`   | `STING_DEFAULT_WINDOW`  | (`--window`)         | `7d`       | look-back when `since` unspecified       |
+| `default_repos`    | `STING_DEFAULT_REPOS`   | (`--repos`)          | —          | repo/project list for `repos` scope      |
+| `default_org`      | `STING_DEFAULT_ORG`     | (`--org`)            | —          | org/group for `org` scope                |
+| `default_format`   | `STING_DEFAULT_FORMAT`  | (`-o`)               | `markdown` | CLI output format                        |
+| `include_stats`    | `STING_INCLUDE_STATS`   | (`--stats`)          | `false`    | fetch additions/deletions per commit     |
 
 Keys in parentheses are per-query request flags that override the resolved
 default for a single invocation. See `config.example.yaml`.
@@ -163,6 +201,7 @@ Package and API reference (godoc):
 ```sh
 go doc ./...                # synopsis of every package
 go doc ./ghclient Client    # a specific type
+go doc ./gitlabclient Client
 ```
 
 ## Documentation
@@ -182,6 +221,7 @@ Public packages (importable; the evidence contract — see
 model/                domain types (leaf) + Result SchemaVersion
 config/               Config, viper keys, window/time parsing, query resolution
 ghclient/             go-github wrapper + scope dispatch + normalization
+gitlabclient/         GitLab REST wrapper + scope dispatch + normalization
 ```
 
 Application layer (internal):
@@ -189,6 +229,7 @@ Application layer (internal):
 ```
 cmd/sting/            thin entrypoint -> internal/cli
 internal/cli/         cobra command tree + viper wiring
+internal/commitclient/ provider client selection
 internal/render/      JSON + Markdown rendering
 internal/mcpserver/   MCP server; read-only get_commits tool
 internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)

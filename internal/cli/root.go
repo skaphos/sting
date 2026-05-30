@@ -2,8 +2,8 @@
 // Package cli is the cobra command tree for the sting CLI: querying commits,
 // running the MCP server, and installing/uninstalling the server into agent
 // runtimes. Configuration is resolved with viper (defaults < config file < env
-// < flags) so a dedicated GitHub PAT can live in sting's own config rather than
-// relying on the ambient GITHUB_TOKEN.
+// < flags) so dedicated provider PATs can live in sting's own config rather
+// than relying on ambient provider tokens.
 package cli
 
 import (
@@ -19,7 +19,7 @@ import (
 )
 
 // envPrefix namespaces environment overrides (e.g. STING_TOKEN, STING_WINDOW)
-// so sting's PAT stays distinct from the ambient GITHUB_TOKEN.
+// so sting's PATs stay distinct from ambient provider tokens.
 const envPrefix = "STING"
 
 var (
@@ -29,8 +29,8 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "sting",
-	Short: "Query a GitHub user's commits over a time window",
-	Long: "sting reports a GitHub user's commits over a time window for an LLM agent or a terminal.\n\n" +
+	Short: "Query a GitHub or GitLab user's commits over a time window",
+	Long: "sting reports a GitHub or GitLab user's commits over a time window for an LLM agent or a terminal.\n\n" +
 		"Run with query flags to print a report, `sting mcp` to serve the read-only get_commits tool over stdio, " +
 		"or `sting install` to register that server with your agent runtimes.",
 	SilenceUsage:  true,
@@ -45,6 +45,8 @@ func init() {
 	pf.StringVar(&configFile, "config", "", "config file (default: search XDG/HOME for sting/config.yaml)")
 	pf.String("token", "", "GitHub personal access token (overrides config/env)")
 	pf.String("base-url", "", "GitHub Enterprise API base URL")
+	pf.String("gitlab-token", "", "GitLab personal access token (overrides config/env)")
+	pf.String("gitlab-base-url", "", "GitLab API v4 base URL")
 	pf.Int("per-page", 100, "API page size (1-100)")
 	pf.Int("max-commits", 0, "cap on returned commits (0 = unlimited)")
 
@@ -52,6 +54,8 @@ func init() {
 	// over env and file when set.
 	must(v.BindPFlag("token", pf.Lookup("token")))
 	must(v.BindPFlag("base_url", pf.Lookup("base-url")))
+	must(v.BindPFlag("gitlab_token", pf.Lookup("gitlab-token")))
+	must(v.BindPFlag("gitlab_base_url", pf.Lookup("gitlab-base-url")))
 	must(v.BindPFlag("per_page", pf.Lookup("per-page")))
 	must(v.BindPFlag("max_commits", pf.Lookup("max-commits")))
 

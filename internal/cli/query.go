@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/skaphos/sting/config"
-	"github.com/skaphos/sting/ghclient"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,8 @@ const queryTimeout = 2 * time.Minute
 // resolved config defaults for a single invocation.
 func registerQueryFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.String("author", "", "GitHub username whose commits to fetch (required)")
+	f.String("provider", "", "source control provider: github|gitlab")
+	f.String("author", "", "provider username or author string whose commits to fetch (required)")
 	f.String("since", "", "window start (RFC3339 or YYYY-MM-DD); overrides --window")
 	f.String("until", "", "window end (RFC3339 or YYYY-MM-DD); defaults to now")
 	f.String("window", "", "look-back window when --since is unset (e.g. 7d, 2w, 48h)")
@@ -49,19 +50,21 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 	since, _ := f.GetString("since")
 	until, _ := f.GetString("until")
 	window, _ := f.GetString("window")
+	provider, _ := f.GetString("provider")
 	scope, _ := f.GetString("scope")
 	repos, _ := f.GetStringSlice("repos")
 	org, _ := f.GetString("org")
 	format, _ := f.GetString("format")
 
 	req := config.Request{
-		Author: author,
-		Since:  since,
-		Until:  until,
-		Window: window,
-		Scope:  scope,
-		Repos:  repos,
-		Org:    org,
+		Provider: provider,
+		Author:   author,
+		Since:    since,
+		Until:    until,
+		Window:   window,
+		Scope:    scope,
+		Repos:    repos,
+		Org:      org,
 	}
 	if f.Changed("stats") {
 		stats, _ := f.GetBool("stats")
@@ -78,7 +81,7 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	client, err := ghclient.New(cfg.Token, cfg.BaseURL, cfg.PerPage)
+	client, err := commitclient.New(cfg, q.Provider)
 	if err != nil {
 		return err
 	}

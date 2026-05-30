@@ -98,6 +98,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	return model.Result{
 		SchemaVersion: model.SchemaVersion,
 		GeneratedAt:   time.Now(),
+		Provider:      model.ProviderGitHub,
 		Author:        q.Author,
 		Scope:         q.Scope,
 		Since:         q.Since,

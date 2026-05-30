@@ -11,13 +11,14 @@ import (
 // Request is the raw, mostly-string input from a CLI invocation or an MCP tool
 // call. Empty fields fall back to configuration defaults during Resolve.
 type Request struct {
-	Author string
-	Since  string // RFC3339 or YYYY-MM-DD; empty uses Window
-	Until  string // RFC3339 or YYYY-MM-DD; empty means now
-	Window string // look-back (e.g. "7d"); used only when Since is empty
-	Scope  string // search|repos|org; empty uses default
-	Repos  []string
-	Org    string
+	Provider string // github|gitlab; empty uses default
+	Author   string
+	Since    string // RFC3339 or YYYY-MM-DD; empty uses Window
+	Until    string // RFC3339 or YYYY-MM-DD; empty means now
+	Window   string // look-back (e.g. "7d"); used only when Since is empty
+	Scope    string // search|repos|org; empty uses default
+	Repos    []string
+	Org      string
 
 	// IncludeStats overrides the default when non-nil.
 	IncludeStats *bool
@@ -30,12 +31,26 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		return model.Query{}, fmt.Errorf("author is required")
 	}
 
+	provider := model.Provider(req.Provider)
+	if provider == "" {
+		provider = cfg.DefaultProvider
+	}
+	if provider == "" {
+		provider = model.ProviderGitHub
+	}
+	if !provider.Valid() {
+		return model.Query{}, fmt.Errorf("invalid provider %q (want github|gitlab)", provider)
+	}
+
 	scope := model.Scope(req.Scope)
 	if scope == "" {
 		scope = cfg.DefaultScope
 	}
 	if !scope.Valid() {
 		return model.Query{}, fmt.Errorf("invalid scope %q (want search|repos|org)", scope)
+	}
+	if provider == model.ProviderGitLab && scope == model.ScopeSearch {
+		return model.Query{}, fmt.Errorf("provider %q does not support scope %q (use repos or org)", provider, scope)
 	}
 
 	until := now
@@ -87,6 +102,7 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 	}
 
 	return model.Query{
+		Provider:     provider,
 		Author:       req.Author,
 		Since:        since,
 		Until:        until,
