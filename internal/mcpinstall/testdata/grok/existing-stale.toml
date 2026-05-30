@@ -1,0 +1,4 @@
+[mcp_servers.sting]
+command = "/old/path/sting"
+args = ["serve"]
+enabled = false

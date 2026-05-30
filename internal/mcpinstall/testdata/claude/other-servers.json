@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "other": {
+      "command": "/bin/other",
+      "args": ["run"]
+    }
+  }
+}

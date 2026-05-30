@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sting": {
+      "command": "/old/path/sting",
+      "args": ["serve"]
+    }
+  }
+}

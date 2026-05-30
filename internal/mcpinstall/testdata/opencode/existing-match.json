@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "sting": {
+      "type": "local",
+      "command": ["/usr/local/bin/sting", "mcp"],
+      "enabled": true
+    }
+  }
+}

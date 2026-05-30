@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "other": {
+      "type": "local",
+      "command": ["/bin/other", "run"],
+      "enabled": true
+    }
+  }
+}
