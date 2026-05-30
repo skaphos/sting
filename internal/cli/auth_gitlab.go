@@ -18,9 +18,8 @@ import (
 )
 
 var authGitLabCmd = &cobra.Command{
-	Use:     "gitlab",
-	Aliases: []string{"login gitlab"},
-	Short:   "Authenticate with GitLab using OAuth Device Flow",
+	Use:   "gitlab",
+	Short: "Authenticate with GitLab using OAuth Device Flow",
 	Long: `Authenticate with GitLab using OAuth (recommended).
 
 Official Skaphos/Sting OAuth App credentials are included, so this works out of the box

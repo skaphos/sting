@@ -106,7 +106,7 @@ func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 	if !initYes {
 		fmt.Fprintln(out, "No credentials found yet for this provider.")
 		fmt.Fprintln(out, "Would you like to authenticate now? [Y/n]")
-		if prompt(in) == "n" {
+		if prompt(out, in) == "n" {
 			fmt.Fprintln(out, "\nYou can run it later with:")
 			if provider == credentials.ProviderGitHub {
 				fmt.Fprintln(out, "  sting auth github")
@@ -136,8 +136,8 @@ func printFinalSummary(out io.Writer) {
 }
 
 //nolint:errcheck
-func prompt(in *bufio.Reader) string {
-	fmt.Print("> ")
+func prompt(out io.Writer, in *bufio.Reader) string {
+	fmt.Fprint(out, "> ")
 	text, _ := in.ReadString('\n')
 	return strings.ToLower(strings.TrimSpace(text))
 }
@@ -251,7 +251,7 @@ func offerInstall(cmd *cobra.Command, out io.Writer, in *bufio.Reader) error {
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Would you like to register Sting with your agent runtimes now? (Claude, Codex, etc.) [Y/n]")
-	answer := prompt(in)
+	answer := prompt(out, in)
 
 	if answer == "n" {
 		fmt.Fprintln(out, "\nYou can do this later with: sting install")

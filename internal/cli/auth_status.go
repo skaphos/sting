@@ -113,7 +113,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintln(cmd.OutOrStdout())
 	if authStatusHostname != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Run `sting auth github --hostname %s` to authenticate.\n", authStatusHostname)
+		fmt.Fprintf(cmd.OutOrStdout(), "Run `sting auth <provider> --hostname %s` to authenticate (use github or gitlab).\n", authStatusHostname)
 	} else {
 		fmt.Fprintln(cmd.OutOrStdout(), "Run `sting auth github` to authenticate with GitHub using OAuth (recommended).")
 		fmt.Fprintln(cmd.OutOrStdout(), "Use --hostname for GitHub Enterprise Server or self-hosted GitLab instances.")

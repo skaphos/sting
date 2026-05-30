@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -451,6 +452,9 @@ func TestListReportsKeyringMarkers(t *testing.T) {
 // TestSaveInsecureHostsWriteError forces an error in saveInsecureHosts by
 // making the target directory unwritable after the store is created.
 func TestSaveInsecureHostsWriteError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("permission error tests are Linux-specific")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("running as root; cannot test permission errors")
 	}
@@ -473,6 +477,9 @@ func TestSaveInsecureHostsWriteError(t *testing.T) {
 
 // TestLoadInsecureHosts_PermissionError exercises the read error path in loadInsecureHosts.
 func TestLoadInsecureHosts_PermissionError(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("permission error tests are Linux-specific")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("running as root; cannot test permission errors")
 	}

@@ -15,9 +15,8 @@ import (
 )
 
 var authGitHubCmd = &cobra.Command{
-	Use:     "github",
-	Aliases: []string{"login github"},
-	Short:   "Authenticate with GitHub using OAuth",
+	Use:   "github",
+	Short: "Authenticate with GitHub using OAuth",
 	Long: `Start the OAuth flow to authenticate with GitHub (recommended).
 
 Official Skaphos/Sting OAuth App credentials are included, so this works out of the box
