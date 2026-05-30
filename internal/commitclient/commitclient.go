@@ -5,6 +5,7 @@ package commitclient
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/ghclient"
@@ -51,7 +52,7 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 func resolveGitHubToken(cfg config.Config) string {
 	// Try the modern credential store first (supports OAuth + PATs stored via `auth` commands)
 	if store, err := credentials.New(); err == nil {
-		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitHub, "github.com"); err == nil && tok.AccessToken != "" {
+		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitHub, githubHost(cfg)); err == nil && tok.AccessToken != "" {
 			return tok.AccessToken
 		}
 	}
@@ -65,11 +66,42 @@ func resolveGitHubToken(cfg config.Config) string {
 // (config or STING_GITLAB_TOKEN) for backward compatibility.
 func resolveGitLabToken(cfg config.Config) string {
 	if store, err := credentials.New(); err == nil {
-		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitLab, "gitlab.com"); err == nil && tok.AccessToken != "" {
+		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitLab, gitlabHost(cfg)); err == nil && tok.AccessToken != "" {
 			return tok.AccessToken
 		}
 	}
 
 	// Legacy fallback
 	return cfg.GitLabToken
+}
+
+// githubHost returns the hostname to use when looking up GitHub credentials.
+// It derives the host from cfg.BaseURL when targeting GitHub Enterprise Server,
+// falling back to "github.com".
+func githubHost(cfg config.Config) string {
+	return credentialHost(cfg.BaseURL, "github.com")
+}
+
+// gitlabHost returns the hostname to use when looking up GitLab credentials.
+// It derives the host from cfg.GitLabBaseURL when targeting a self-hosted
+// GitLab instance, falling back to "gitlab.com".
+func gitlabHost(cfg config.Config) string {
+	return credentialHost(cfg.GitLabBaseURL, "gitlab.com")
+}
+
+// credentialHost extracts a bare hostname from a base URL (for credential
+// storage keys). It is resilient to full API paths like
+// "https://ghe.example.com/api/v3" and bare hostnames.
+func credentialHost(baseURL, defaultHost string) string {
+	if baseURL == "" {
+		return defaultHost
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return defaultHost
+	}
+	if h := u.Hostname(); h != "" {
+		return h
+	}
+	return defaultHost
 }
