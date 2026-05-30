@@ -11,17 +11,20 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Guided setup for first-time users",
-	Long: `Run an interactive wizard to get started with Sting.
+	Long: `Guided first-time setup for Sting.
 
-This will help you:
-  - Choose your primary provider (GitHub or GitLab)
-  - Authenticate using the recommended OAuth flow
-  - Set a few sensible defaults
+Sting defaults to GitHub. This command will help you get authenticated
+and ready to query commits.
 
-You can run individual steps manually at any time:
+Primary flow:
+  sting init
+  sting auth github     # the recommended default
+
+GitLab is fully supported but treated as a secondary/optional provider.
+
+You can always run the auth commands directly:
   sting auth github
   sting auth gitlab
-  sting query --help
 `,
 	Args: cobra.NoArgs,
 	RunE: runInit,
@@ -32,7 +35,6 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintln(out, "Welcome to Sting!")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Let's get you set up.")
 
 	// Check current authentication state (best effort)
 	store, err := credentials.New()
@@ -40,35 +42,47 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		ghTok, _, _ := store.Load(cmd.Context(), credentials.ProviderGitHub, "github.com")
 		glTok, _, _ := store.Load(cmd.Context(), credentials.ProviderGitLab, "gitlab.com")
 
-		if ghTok.AccessToken != "" || glTok.AccessToken != "" {
+		if ghTok.AccessToken != "" {
+			fmt.Fprintln(out, "GitHub credentials detected. You're ready to go!")
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, "You already have some credentials configured:")
-			if ghTok.AccessToken != "" {
-				fmt.Fprintln(out, "  ✓ GitHub")
-			}
+			fmt.Fprintln(out, "Try:")
+			fmt.Fprintln(out, "  sting query --author YOUR_GITHUB_HANDLE")
 			if glTok.AccessToken != "" {
-				fmt.Fprintln(out, "  ✓ GitLab")
+				fmt.Fprintln(out, "  (GitLab credentials also present)")
+			} else {
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, "If you also want to query GitLab commits, run:")
+				fmt.Fprintln(out, "  sting auth gitlab")
 			}
+			return nil
+		}
+
+		if glTok.AccessToken != "" {
+			fmt.Fprintln(out, "GitLab credentials detected (no GitHub credentials found).")
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, "You're good to go! Try:")
-			fmt.Fprintln(out, "  sting query --author YOUR_USERNAME")
+			fmt.Fprintln(out, "Note: Sting defaults to GitHub. If you'd like to use GitHub as well:")
+			fmt.Fprintln(out, "  sting auth github")
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Or query GitLab directly:")
+			fmt.Fprintln(out, "  sting query --provider gitlab --author YOUR_GITLAB_HANDLE")
 			return nil
 		}
 	}
 
-	fmt.Fprintln(out)
+	// No credentials at all → GitHub-first guidance
 	fmt.Fprintln(out, "No credentials found yet.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Which provider would you like to set up first?")
-	fmt.Fprintln(out, "  1) GitHub (recommended for most people)")
-	fmt.Fprintln(out, "  2) GitLab")
+	fmt.Fprintln(out, "Sting defaults to GitHub. Let's get you set up:")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Run one of these commands to authenticate:")
 	fmt.Fprintln(out, "  sting auth github")
-	fmt.Fprintln(out, "  sting auth gitlab")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "After that, come back and run `sting init` again, or just try:")
-	fmt.Fprintln(out, "  sting query --author YOUR_USERNAME")
+	fmt.Fprintln(out, "This is the recommended path for most users.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "After authenticating, try:")
+	fmt.Fprintln(out, "  sting query --author YOUR_GITHUB_HANDLE")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "GitLab is also supported if needed:")
+	fmt.Fprintln(out, "  sting auth gitlab")
 
 	return nil
 }
