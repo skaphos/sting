@@ -4,6 +4,7 @@ package mcpinstall
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -24,7 +25,8 @@ func TestWriteAtomicNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows does not model Unix permission bits, so only assert them elsewhere.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
 	}
 }
@@ -50,7 +52,7 @@ func TestWriteAtomicOverwritePreservesMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o640 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
 		t.Errorf("mode = %v, want preserved 0640", info.Mode().Perm())
 	}
 }

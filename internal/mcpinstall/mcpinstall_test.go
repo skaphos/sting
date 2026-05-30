@@ -13,6 +13,8 @@ func isolateHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// os.UserHomeDir reads %USERPROFILE% on Windows, so isolate it too.
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("GROK_CONFIG_DIR", "")
 	t.Setenv("OPENCODE_CONFIG_DIR", "")
