@@ -20,8 +20,8 @@ notes together.
 
 Use `googleapis/release-please-action@v5` as the release gate. Release Please
 opens and updates the release PR, bumps `.release-please-manifest.json`, updates
-`CHANGELOG.md`, creates the `vX.Y.Z` tag, and creates the GitHub release with
-the release notes.
+`CHANGELOG.md`, creates the `vX.Y.Z` tag, and creates a draft GitHub release
+with the release notes.
 
 The workflow uses the `skaphos-release-bot` GitHub App token rather than the
 default `GITHUB_TOKEN` so the tag created by Release Please triggers the
@@ -29,8 +29,9 @@ tag-driven GoReleaser workflow.
 
 GoReleaser remains responsible for building and uploading artifacts, SBOMs,
 signatures, attestations, and the Homebrew cask. It is configured with
-`release.mode: keep-existing` and `changelog.disable: true` so it attaches to
-the Release Please release without replacing its notes.
+`release.use_existing_draft: true`, `release.mode: keep-existing`, and
+`changelog.disable: true` so it attaches to the Release Please draft without
+replacing its notes, then publishes the release after assets are uploaded.
 
 ## Consequences
 
@@ -38,6 +39,8 @@ the Release Please release without replacing its notes.
   content, tags, and GitHub release notes.
 - GoReleaser no longer computes user-facing release notes. Its release job is
   artifact publication for the existing tag/release.
+- The draft handoff is required for immutable releases: once a release is
+  published, GitHub rejects later asset uploads.
 - The release flow depends on the release bot app having `contents: write`,
   `pull-requests: write`, and enough repository access for app-created tag
   pushes to trigger downstream workflows.
