@@ -4,6 +4,16 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.0 (2026-05-30)
+
+
+### Features
+
+* add commit-query core ([a1615cd](https://github.com/skaphos/sting/commit/a1615cd8af1e207e8ee7744c0e4b335f935cd73f))
+* add MCP server with read-only get_commits tool ([6bf285e](https://github.com/skaphos/sting/commit/6bf285e72ca379fd096744c50bd7ab230d7e77e2))
+* add multi-runtime MCP installer ([c88615c](https://github.com/skaphos/sting/commit/c88615c631d506229d59e979f93c824ce26de192))
+* wire cobra CLI with viper config and the sting binary ([97cd171](https://github.com/skaphos/sting/commit/97cd171c8a7710e9c4a551ecc84adf9deb6c7bff))
+
 ## [Unreleased]
 
 ### Added
