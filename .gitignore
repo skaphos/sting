@@ -1,0 +1,5 @@
+/bin/
+/sting
+config.json
+config.yaml
+*.out

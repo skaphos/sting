@@ -1,0 +1,65 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  BIN: sting
+  PKG: ./cmd/sting
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the sting binary into ./bin
+    cmds:
+      - go build -o bin/{{.BIN}} {{.PKG}}
+
+  install:
+    desc: Install sting into GOBIN
+    cmds:
+      - go install {{.PKG}}
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy go.mod / go.sum
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Tidy, vet, and test
+    cmds:
+      - task: tidy
+      - task: vet
+      - task: test
+
+  run:
+    desc: 'Run a CLI query, e.g. task run -- --author mfacenet --window 7d'
+    cmds:
+      - go run {{.PKG}} {{.CLI_ARGS}}
+
+  mcp:
+    desc: Run the MCP server over stdio (for manual testing)
+    cmds:
+      - go run {{.PKG}} mcp
+
+  install:
+    desc: 'Register sting with detected agent runtimes (pass flags after --)'
+    cmds:
+      - go run {{.PKG}} install {{.CLI_ARGS}}
