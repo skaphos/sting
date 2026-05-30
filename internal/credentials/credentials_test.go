@@ -5,6 +5,8 @@ package credentials
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -387,5 +389,59 @@ func TestSaveInsecureWithUsername(t *testing.T) {
 	}
 	if got.Username != "alice" {
 		t.Errorf("expected username to be stored, got %q", got.Username)
+	}
+}
+
+// --- Additional coverage for load/save error paths and marker logic ---
+
+func TestLoadInsecureHosts_BadYAML(t *testing.T) {
+	tmp := t.TempDir()
+	hostsPath := filepath.Join(tmp, "hosts.yml")
+	// Write invalid YAML
+	_ = os.WriteFile(hostsPath, []byte("this is not: valid: yaml: ["), 0600)
+
+	s := WithFilePath(tmp)
+
+	// loadInsecureHosts is called during construction.
+	// With current behavior New/WithFilePath ignore load errors for resilience,
+	// but we still want the code path exercised for coverage.
+	// Force a direct call to hit the error return.
+	err := s.(*store).loadInsecureHosts()
+	if err == nil {
+		t.Error("expected error when loading malformed hosts.yml")
+	}
+}
+
+func TestListReportsKeyringMarkers(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	// Manually create a marker entry (no oauth_token) to simulate a credential
+	// that lives only in the keyring. This exercises the SourceKeyring detection
+	// branch in List().
+	composite := "github:ghe.example.com"
+	s.(*store).hosts = map[string]map[string]string{
+		composite: {
+			"user": "bob",
+			// deliberately no "oauth_token"
+		},
+	}
+
+	refs, err := s.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	for _, r := range refs {
+		if r.Host == "ghe.example.com" && r.Source == SourceKeyring {
+			found = true
+			if r.Username != "bob" {
+				t.Errorf("expected username bob on keyring marker, got %q", r.Username)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected to see keyring marker entry with SourceKeyring in List()")
 	}
 }
