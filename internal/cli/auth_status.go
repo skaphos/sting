@@ -24,43 +24,74 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("initialize credential store: %w", err)
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Authentication status:")
+	fmt.Fprintln(cmd.OutOrStdout(), "Authentication status:\n")
 
 	refs, err := store.List(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("list credentials: %w", err)
 	}
 
-	hasNew := len(refs) > 0
-	hasLegacy := false
+	// Group by provider for nicer output
+	githubEntries := []credentials.CredentialRef{}
+	gitlabEntries := []credentials.CredentialRef{}
 
-	if hasNew {
-		for _, ref := range refs {
-			source := string(ref.Source)
-			if ref.Username != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s/%s  (user: %s, source: %s)\n",
-					ref.Provider, ref.Host, ref.Username, source)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s/%s  (source: %s)\n",
-					ref.Provider, ref.Host, source)
-			}
+	for _, ref := range refs {
+		switch ref.Provider {
+		case credentials.ProviderGitHub:
+			githubEntries = append(githubEntries, ref)
+		case credentials.ProviderGitLab:
+			gitlabEntries = append(gitlabEntries, ref)
 		}
 	}
 
-	// Report legacy sources for visibility during transition.
-	if token := v.GetString("token"); token != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "  github (legacy): token present via config or STING_TOKEN")
-		hasLegacy = true
-	}
-	if token := v.GetString("gitlab_token"); token != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "  gitlab (legacy): gitlab_token present via config or STING_GITLAB_TOKEN")
-		hasLegacy = true
+	// GitHub section (focus area)
+	fmt.Fprintln(cmd.OutOrStdout(), "GitHub:")
+	if len(githubEntries) > 0 {
+		for _, ref := range githubEntries {
+			source := string(ref.Source)
+			if ref.Username != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Logged into %s as %s (source: %s)\n",
+					ref.Host, ref.Username, source)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Logged into %s (source: %s)\n",
+					ref.Host, source)
+			}
+		}
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "  Not logged in.")
 	}
 
-	if !hasNew && !hasLegacy {
-		fmt.Fprintln(cmd.OutOrStdout(), "  No credentials found.")
-		fmt.Fprintln(cmd.OutOrStdout(), "  Run `sting auth github` or `sting auth gitlab` to authenticate.")
+	// Legacy GitHub token (still supported as fallback)
+	if token := v.GetString("token"); token != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "  • Legacy token available via STING_TOKEN / config (fallback)")
 	}
+
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	// GitLab section (deprioritized for now)
+	fmt.Fprintln(cmd.OutOrStdout(), "GitLab:")
+	if len(gitlabEntries) > 0 {
+		for _, ref := range gitlabEntries {
+			source := string(ref.Source)
+			if ref.Username != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Logged into %s as %s (source: %s)\n",
+					ref.Host, ref.Username, source)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✓ Logged into %s (source: %s)\n",
+					ref.Host, source)
+			}
+		}
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "  Not logged in.")
+	}
+
+	if token := v.GetString("gitlab_token"); token != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "  • Legacy token available via STING_GITLAB_TOKEN / config (fallback)")
+	}
+
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), "Run `sting auth github` to authenticate with GitHub using OAuth (recommended).")
+	fmt.Fprintln(cmd.OutOrStdout(), "Legacy PATs continue to work as a fallback.")
 
 	return nil
 }
