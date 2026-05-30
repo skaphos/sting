@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/ghclient"
 	"github.com/skaphos/sting/gitlabclient"
 	"github.com/skaphos/sting/model"
@@ -27,7 +28,8 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 	}
 	switch provider {
 	case model.ProviderGitHub:
-		client, err := ghclient.New(cfg.Token, cfg.BaseURL, cfg.PerPage)
+		token := resolveGitHubToken(cfg)
+		client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage)
 		if err != nil {
 			return nil, fmt.Errorf("build github client: %w", err)
 		}
@@ -41,4 +43,18 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", provider)
 	}
+}
+
+// resolveGitHubToken prefers the new credentials store (for OAuth tokens),
+// falling back to the legacy config/env token for backward compatibility.
+func resolveGitHubToken(cfg config.Config) string {
+	// Try the modern credential store first (supports OAuth + PATs stored via `auth` commands)
+	if store, err := credentials.New(); err == nil {
+		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitHub, "github.com"); err == nil && tok.AccessToken != "" {
+			return tok.AccessToken
+		}
+	}
+
+	// Legacy fallback (STING_TOKEN, config token, etc.)
+	return cfg.Token
 }
