@@ -4,7 +4,10 @@
 // client and the renderers can depend on it without creating import cycles.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Scope selects how commits are discovered for an author.
 type Scope string
@@ -67,12 +70,8 @@ type Commit struct {
 
 // Summary is the first line of the commit message.
 func (c Commit) Summary() string {
-	for i := 0; i < len(c.Message); i++ {
-		if c.Message[i] == '\n' {
-			return c.Message[:i]
-		}
-	}
-	return c.Message
+	first, _, _ := strings.Cut(c.Message, "\n")
+	return first
 }
 
 // Result is the outcome of a Query: the matching commits plus the parameters

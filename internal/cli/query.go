@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -10,6 +11,10 @@ import (
 	"github.com/skaphos/sting/internal/render"
 	"github.com/spf13/cobra"
 )
+
+// queryTimeout bounds the GitHub API round-trips for a single CLI query so a
+// stalled connection cannot hang the command indefinitely.
+const queryTimeout = 2 * time.Minute
 
 // registerQueryFlags attaches the per-query flags to cmd. They are local flags
 // (not bound to viper) because they are request inputs that override the
@@ -78,7 +83,11 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	result, err := client.Collect(cmd.Context(), q)
+	// Bound the GitHub round-trips so a hung connection cannot wedge the CLI.
+	ctx, cancel := context.WithTimeout(cmd.Context(), queryTimeout)
+	defer cancel()
+
+	result, err := client.Collect(ctx, q)
 	if err != nil {
 		return err
 	}

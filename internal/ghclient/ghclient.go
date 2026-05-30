@@ -5,6 +5,7 @@ package ghclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,22 @@ import (
 	"github.com/google/go-github/v82/github"
 	"github.com/skaphos/sting/internal/model"
 )
+
+// apiError wraps a go-github error, giving rate-limit failures a clearer,
+// agent-actionable message (an MCP client can decide to back off) while
+// preserving the original error for errors.As/Is callers.
+func apiError(op string, err error) error {
+	var rl *github.RateLimitError
+	if errors.As(err, &rl) {
+		return fmt.Errorf("%s: github rate limit exceeded (resets %s): %w",
+			op, rl.Rate.Reset.UTC().Format(time.RFC3339), err)
+	}
+	var ab *github.AbuseRateLimitError
+	if errors.As(err, &ab) {
+		return fmt.Errorf("%s: github secondary rate limit, retry later: %w", op, err)
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
 
 // Client retrieves commits from GitHub for an author over a time window.
 type Client struct {
@@ -70,8 +87,10 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		return model.Result{}, err
 	}
 
+	// The scope helpers stop fetching once they have MaxCommits, so reaching the
+	// cap means more commits may exist upstream; clip to the cap and flag it.
 	truncated := false
-	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
+	if q.MaxCommits > 0 && len(commits) >= q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
 	}
@@ -99,7 +118,7 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 	for {
 		res, resp, err := c.gh.Search.Commits(ctx, query, opts)
 		if err != nil {
-			return nil, fmt.Errorf("search commits: %w", err)
+			return nil, apiError("search commits", err)
 		}
 		for _, cr := range res.Commits {
 			out = append(out, fromSearchResult(cr))
@@ -131,6 +150,9 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 			return nil, err
 		}
 		out = append(out, commits...)
+		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+			break
+		}
 	}
 	return out, nil
 }
@@ -155,6 +177,9 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 			return nil, err
 		}
 		out = append(out, commits...)
+		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+			break
+		}
 	}
 	return out, nil
 }
@@ -171,7 +196,7 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 	for {
 		commits, resp, err := c.gh.Repositories.ListCommits(ctx, owner, repo, opts)
 		if err != nil {
-			return nil, fmt.Errorf("list commits %s: %w", full, err)
+			return nil, apiError("list commits "+full, err)
 		}
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
@@ -181,6 +206,9 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 				}
 			}
 			out = append(out, cm)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				return out, nil
+			}
 		}
 		if resp.NextPage == 0 {
 			break
@@ -198,7 +226,7 @@ func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
 	for {
 		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, org, opts)
 		if err != nil {
-			return nil, fmt.Errorf("list org repos %s: %w", org, err)
+			return nil, apiError("list org repos "+org, err)
 		}
 		for _, r := range repos {
 			out = append(out, r.GetFullName())
@@ -214,7 +242,7 @@ func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
 func (c *Client) fillStats(ctx context.Context, owner, repo string, cm *model.Commit) error {
 	rc, _, err := c.gh.Repositories.GetCommit(ctx, owner, repo, cm.SHA, nil)
 	if err != nil {
-		return fmt.Errorf("get commit stats %s/%s@%s: %w", owner, repo, cm.SHA, err)
+		return apiError(fmt.Sprintf("get commit stats %s/%s@%s", owner, repo, cm.SHA), err)
 	}
 	if s := rc.GetStats(); s != nil {
 		cm.Additions = s.GetAdditions()
