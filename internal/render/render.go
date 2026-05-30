@@ -136,14 +136,15 @@ func writeFileChange(b *strings.Builder, f model.File) {
 	}
 	b.WriteString("\n")
 	if f.Patch != "" {
-		b.WriteString("\n```diff\n")
-		b.WriteString(f.Patch)
+		b.WriteString("\n    ```diff\n")
+		indented := "    " + strings.ReplaceAll(f.Patch, "\n", "\n    ")
+		b.WriteString(indented)
 		if !strings.HasSuffix(f.Patch, "\n") {
 			b.WriteString("\n")
 		}
 		if f.PatchTruncated {
-			b.WriteString("\n# diff truncated\n")
+			b.WriteString("    # diff truncated\n")
 		}
-		b.WriteString("```\n")
+		b.WriteString("    ```\n")
 	}
 }

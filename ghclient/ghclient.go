@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v82/github"
+	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
 )
 
@@ -262,6 +263,7 @@ func needsDetail(q model.Query) bool {
 func (c *Client) fillDetails(ctx context.Context, owner, repo string, cm *model.Commit, q model.Query) error {
 	opts := &github.ListOptions{PerPage: c.perPage}
 	var files []*github.CommitFile
+	needFiles := q.IncludeFiles || q.IncludeDiffs
 	for {
 		rc, resp, err := c.gh.Repositories.GetCommit(ctx, owner, repo, cm.SHA, opts)
 		if err != nil {
@@ -272,13 +274,15 @@ func (c *Client) fillDetails(ctx context.Context, owner, repo string, cm *model.
 			cm.Deletions = s.GetDeletions()
 			cm.Changes = s.GetTotal()
 		}
-		files = append(files, rc.Files...)
-		if resp.NextPage == 0 {
+		if needFiles {
+			files = append(files, rc.Files...)
+		}
+		if resp.NextPage == 0 || !needFiles {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
-	if q.IncludeFiles || q.IncludeDiffs {
+	if needFiles {
 		cm.Files = githubFiles(files, q)
 	}
 	if cm.Changes == 0 && (cm.Additions != 0 || cm.Deletions != 0) {
@@ -303,24 +307,11 @@ func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
 			Changes:      f.GetChanges(),
 		}
 		if q.IncludeDiffs {
-			mf.Patch, mf.PatchTruncated, budget = consumePatchBudget(f.GetPatch(), budget)
+			mf.Patch, mf.PatchTruncated, budget = patch.ConsumePatchBudget(f.GetPatch(), budget)
 		}
 		out = append(out, mf)
 	}
 	return out
-}
-
-func consumePatchBudget(patch string, budget int) (string, bool, int) {
-	if patch == "" {
-		return "", false, budget
-	}
-	if budget <= 0 {
-		return "", true, 0
-	}
-	if len(patch) <= budget {
-		return patch, false, budget - len(patch)
-	}
-	return patch[:budget], true, 0
 }
 
 func buildSearchQuery(q model.Query) string {

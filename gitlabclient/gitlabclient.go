@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
 )
 
@@ -344,7 +345,7 @@ func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string,
 				mf.Path = gd.OldPath
 			}
 			if q.IncludeDiffs {
-				mf.Patch, mf.PatchTruncated, budget = consumePatchBudget(gd.Diff, budget)
+				mf.Patch, mf.PatchTruncated, budget = patch.ConsumePatchBudget(gd.Diff, budget)
 				mf.PatchTruncated = mf.PatchTruncated || gd.TooLarge || gd.Collapsed
 			} else if gd.TooLarge || gd.Collapsed {
 				mf.PatchTruncated = true
@@ -398,17 +399,4 @@ func countPatchLines(patch string) (additions, deletions int) {
 		}
 	}
 	return additions, deletions
-}
-
-func consumePatchBudget(patch string, budget int) (string, bool, int) {
-	if patch == "" {
-		return "", false, budget
-	}
-	if budget <= 0 {
-		return "", true, 0
-	}
-	if len(patch) <= budget {
-		return patch, false, budget - len(patch)
-	}
-	return patch[:budget], true, 0
 }

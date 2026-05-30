@@ -130,7 +130,7 @@ The default query returns commit metadata and messages only. Use the evidence
 flags when you want an agent to explain the actual code changes:
 
 - `--stats` adds per-commit additions, deletions, and total changed lines.
-- `--files` adds changed file paths, statuses, and per-file line counts.
+- `--files` adds changed file paths, statuses, and per-file line counts (and also populates the per-commit totals).
 - `--diffs` adds patch text for each changed file and implies `--files`.
 - `--max-diff-bytes` caps patch text per commit; truncated files are marked in
   JSON and Markdown.
