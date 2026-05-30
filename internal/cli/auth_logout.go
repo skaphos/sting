@@ -14,15 +14,24 @@ var authLogoutCmd = &cobra.Command{
 	Short: "Log out of a provider and remove stored credentials",
 	Long: `Remove stored authentication credentials for a provider.
 
+Use --hostname to log out of a specific GitHub Enterprise Server or GitLab instance.
+
 This removes the token from the secure keyring (preferred) and any
 insecure fallback storage.
 
 Examples:
   sting auth logout
   sting auth logout github
-  sting auth logout gitlab`,
+  sting auth logout gitlab
+  sting auth logout github --hostname ghe.example.com`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runAuthLogout,
+}
+
+var authLogoutHostname string
+
+func init() {
+	authLogoutCmd.Flags().StringVar(&authLogoutHostname, "hostname", "", "Log out of a specific hostname (for GitHub Enterprise Server or self-hosted GitLab)")
 }
 
 func runAuthLogout(cmd *cobra.Command, args []string) error {
@@ -44,15 +53,20 @@ func runAuthLogout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown provider %q (use github or gitlab)", providerArg)
 	}
 
+	// Allow overriding the host for GHES / self-hosted instances
+	if authLogoutHostname != "" {
+		host = authLogoutHostname
+	}
+
 	store, err := credentials.New()
 	if err != nil {
 		return fmt.Errorf("initialize credential store: %w", err)
 	}
 
 	if err := store.Delete(cmd.Context(), provider, host); err != nil {
-		return fmt.Errorf("failed to remove credentials for %s: %w", provider, err)
+		return fmt.Errorf("failed to remove credentials for %s on %s: %w", provider, host, err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "✓ Logged out of %s\n", provider)
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Logged out of %s on %s\n", provider, host)
 	return nil
 }
