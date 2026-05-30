@@ -1,6 +1,6 @@
 # Registering OAuth Apps for Sting
 
-> **Status**: Draft (as of 2026-05-30). This guide is being updated in parallel with the OAuth implementation (SKA-466).
+> **Status**: Draft (as of 2026-05-30, updated with trust & governance guidance). This guide is being updated in parallel with the OAuth implementation (SKA-466).
 
 Sting supports two authentication methods:
 
@@ -19,6 +19,28 @@ Sting ships with credentials for **official Skaphos-published OAuth Apps** on bo
 - Clear separation of credentials from ambient `GITHUB_TOKEN` / `GITLAB_TOKEN`.
 
 OAuth is the happy path. PATs remain fully supported for automation, CI, air-gapped environments, and cases where registering an app is impractical.
+
+## Public App vs. Your Own App: Trust and Governance
+
+Sting ships with official Skaphos OAuth Apps for github.com and gitlab.com. This provides a convenient out-of-the-box experience, similar to `gh auth login` and `glab auth login`.
+
+**However, using the public Skaphos app has trust and governance implications:**
+
+- All users authorize the *same* third-party application (the Skaphos/Sting OAuth App).
+- While each person receives their own user-specific token (they can only access what *they* can access), the app registration itself becomes a shared artifact in every authorizing user's (and their organization's) audit logs.
+- Organizations with strict security policies, compliance requirements, or OAuth App allow-lists may not want a third-party vendor app appearing in their environment.
+- Any future change to the scopes requested by Sting affects everyone using the public app.
+
+**Recommendation:**
+
+- **Individuals and small teams** can comfortably use the public Skaphos apps on github.com and gitlab.com.
+- **Organizations, companies, and teams with security/compliance needs** should plan to register and use their own OAuth Applications long-term. This gives you:
+  - Full control over the app name, scopes, and branding in your environment.
+  - Clear ownership and audit trail inside your GitHub/GitLab organization.
+  - The ability to apply your own policies, restrictions, and revocation processes.
+  - Reduced reliance on an external vendor's OAuth App registration.
+
+We intentionally made "bring your own app" a first-class, well-supported path (especially easy on self-hosted and GitHub Enterprise instances). See the provider sections below for registration details and how to pass your own credentials via `--client-id` / environment variables.
 
 ## GitHub (github.com and GitHub Enterprise Server)
 
@@ -151,9 +173,9 @@ Sting requests the minimal scope needed (`read_api` for GitLab, `repo` + `read:o
 
 ## Security Considerations
 
-- CLI tools are **public clients**. The Client Secret must be embedded in the binary. This is an accepted pattern (see GitHub's official guidance on public clients and the `gh` CLI implementation).
+- CLI tools are **public clients**. The Client Secret must be embedded in the binary for confidential apps. This is an accepted pattern (see GitHub's official guidance on public clients and the `gh` CLI implementation). The public Skaphos apps on github.com and gitlab.com are registered as non-confidential where possible, so no secret is required for normal use.
 - Prefer **Device Flow** when possible.
-- For maximum security, many organizations choose to register their own OAuth App (or move to GitHub Apps in the future) rather than relying on a vendor-published app.
+- Using a vendor-published OAuth App (even the official ones from GitHub or GitLab CLIs) creates a shared trust root. While tokens remain per-user, the app appears in organizational audit logs and authorized app lists. Organizations with strong governance, compliance, or third-party app policies should register their own OAuth Applications instead of relying on the public Skaphos apps long-term. This is the recommended path for most companies and teams.
 
 ## Migration and Fallbacks
 
@@ -165,6 +187,7 @@ Sting requests the minimal scope needed (`read_api` for GitLab, `repo` + `read:o
 
 - GitHub OAuth (with public Skaphos app + GHES bring-your-own) is fully implemented and documented.
 - GitLab OAuth device flow is implemented with a public Skaphos app for gitlab.com + self-hosted bring-your-own support.
+- This registration guide now includes explicit guidance on the trust and governance tradeoffs of the public apps vs. registering your own (see the new "Public App vs. Your Own App: Trust and Governance" section).
 - This registration guide is being kept in sync with the code (see `sting auth gitlab --help` and the error messages for the latest instructions).
 
 See also:

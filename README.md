@@ -97,6 +97,8 @@ See `sting auth --help` and [docs/oauth-app-registration.md](docs/oauth-app-regi
 for how to create the required OAuth applications (especially the
 "Device authorization grant flow" checkbox on GitLab).
 
+**Note for organizations:** While the public Skaphos apps are convenient, companies and teams with security or compliance requirements are encouraged to register their own OAuth Applications long-term. See the "Public App vs. Your Own App: Trust and Governance" section in the registration guide for details.
+
 `sting auth status` and `sting auth logout` are also available.
 
 ## Agent integration (the main use case)
