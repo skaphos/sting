@@ -18,7 +18,23 @@ func sampleResult() model.Result {
 		Until:  time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC),
 		Count:  2,
 		Commits: []model.Commit{
-			{SHA: "abcdef1234567", Repo: "skaphos/sting", Date: time.Date(2026, 5, 28, 0, 0, 0, 0, time.UTC), Message: "Add MCP server\n\nbody"},
+			{
+				SHA:       "abcdef1234567",
+				Repo:      "skaphos/sting",
+				Date:      time.Date(2026, 5, 28, 0, 0, 0, 0, time.UTC),
+				Message:   "Add MCP server\n\nbody",
+				Additions: 2,
+				Deletions: 1,
+				Changes:   3,
+				Files: []model.File{{
+					Path:      "internal/mcpserver/server.go",
+					Status:    "modified",
+					Additions: 2,
+					Deletions: 1,
+					Changes:   3,
+					Patch:     "@@ -1 +1 @@\n-old\n+new\n",
+				}},
+			},
 			{SHA: "1234567abcdef", Repo: "skaphos/sting", Date: time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC), Message: "Fix window parsing"},
 		},
 	}
@@ -45,6 +61,12 @@ func TestMarkdownGrouping(t *testing.T) {
 	// SHA shortened to 7 chars.
 	if !strings.Contains(md, "`abcdef1`") {
 		t.Error("SHA not shortened to 7 chars")
+	}
+	if !strings.Contains(md, "internal/mcpserver/server.go") {
+		t.Error("markdown should include file evidence")
+	}
+	if !strings.Contains(md, "```diff") {
+		t.Error("markdown should include requested patch text")
 	}
 }
 

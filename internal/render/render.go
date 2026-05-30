@@ -99,11 +99,52 @@ func toMarkdown(r model.Result) string {
 			fmt.Fprintf(&b, "- `%s` %s — %s",
 				sha, c.Date.UTC().Format("2006-01-02"), c.Summary())
 			if c.Additions != 0 || c.Deletions != 0 {
-				fmt.Fprintf(&b, " (+%d/-%d)", c.Additions, c.Deletions)
+				fmt.Fprintf(&b, " (+%d/-%d", c.Additions, c.Deletions)
+				if c.Changes != 0 {
+					fmt.Fprintf(&b, ", %d lines", c.Changes)
+				}
+				b.WriteString(")")
 			}
 			b.WriteString("\n")
+			for _, f := range c.Files {
+				writeFileChange(&b, f)
+			}
 		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func writeFileChange(b *strings.Builder, f model.File) {
+	path := f.Path
+	if f.PreviousPath != "" {
+		path = f.PreviousPath + " -> " + f.Path
+	}
+	fmt.Fprintf(b, "  - `%s`", path)
+	if f.Status != "" {
+		fmt.Fprintf(b, " %s", f.Status)
+	}
+	if f.Additions != 0 || f.Deletions != 0 {
+		fmt.Fprintf(b, " (+%d/-%d", f.Additions, f.Deletions)
+		if f.Changes != 0 {
+			fmt.Fprintf(b, ", %d lines", f.Changes)
+		}
+		b.WriteString(")")
+	}
+	if f.PatchTruncated && f.Patch == "" {
+		b.WriteString(" _(diff truncated)_")
+	}
+	b.WriteString("\n")
+	if f.Patch != "" {
+		b.WriteString("\n    ```diff\n")
+		indented := "    " + strings.ReplaceAll(f.Patch, "\n", "\n    ")
+		b.WriteString(indented)
+		if !strings.HasSuffix(f.Patch, "\n") {
+			b.WriteString("\n")
+		}
+		if f.PatchTruncated {
+			b.WriteString("    # diff truncated\n")
+		}
+		b.WriteString("    ```\n")
+	}
 }

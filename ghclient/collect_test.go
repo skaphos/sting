@@ -57,7 +57,30 @@ const orgReposBody = `[{"full_name": "skaphos/sting"}]`
 
 const getCommitStatsBody = `{
   "sha": "def456",
-  "stats": {"additions": 42, "deletions": 7}
+  "stats": {"additions": 42, "deletions": 7, "total": 49},
+  "files": [
+    {
+      "filename": "README.md",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 1,
+      "changes": 5,
+      "patch": "@@ -1 +1 @@\n-old\n+new\n"
+    },
+    {
+      "filename": "new.go",
+      "status": "added",
+      "additions": 2,
+      "deletions": 0,
+      "changes": 2,
+      "patch": "@@ -0,0 +1,2 @@\n+package main\n+func main() {}\n"
+    }
+  ]
+}`
+
+const getSearchCommitStatsBody = `{
+  "sha": "abc123",
+  "stats": {"additions": 3, "deletions": 2, "total": 5}
 }`
 
 func TestCollectScopeSearch(t *testing.T) {
@@ -298,6 +321,81 @@ func TestCollectIncludeStats(t *testing.T) {
 	cm := res.Commits[0]
 	if cm.Additions != 42 || cm.Deletions != 7 {
 		t.Errorf("Additions/Deletions = %d/%d, want 42/7", cm.Additions, cm.Deletions)
+	}
+	if cm.Changes != 49 {
+		t.Errorf("Changes = %d, want 49", cm.Changes)
+	}
+}
+
+func TestCollectSearchIncludeStats(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits/abc123"):
+			_, _ = w.Write([]byte(getSearchCommitStatsBody))
+		case strings.Contains(r.URL.Path, "search/commits"):
+			_, _ = w.Write([]byte(searchBody))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:       "octocat",
+		Scope:        model.ScopeSearch,
+		IncludeStats: true,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	cm := res.Commits[0]
+	if cm.Additions != 3 || cm.Deletions != 2 || cm.Changes != 5 {
+		t.Errorf("stats = +%d/-%d/%d, want +3/-2/5", cm.Additions, cm.Deletions, cm.Changes)
+	}
+}
+
+func TestCollectIncludeFilesAndDiffs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits/def456"):
+			_, _ = w.Write([]byte(getCommitStatsBody))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(repoCommitsBody))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:       "octocat",
+		Scope:        model.ScopeRepos,
+		Repos:        []string{"skaphos/sting"},
+		IncludeFiles: true,
+		IncludeDiffs: true,
+		MaxDiffBytes: 24,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	files := res.Commits[0].Files
+	if len(files) != 2 {
+		t.Fatalf("len(Files) = %d, want 2", len(files))
+	}
+	if files[0].Path != "README.md" || files[0].Status != "modified" {
+		t.Errorf("first file = %+v, want README.md modified", files[0])
+	}
+	if files[0].Patch == "" {
+		t.Fatal("first file patch should be included")
+	}
+	if !files[1].PatchTruncated {
+		t.Errorf("second file PatchTruncated = false, want true after shared budget")
 	}
 }
 

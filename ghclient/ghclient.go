@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v82/github"
+	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
 )
 
@@ -124,7 +125,20 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 			return nil, apiError("search commits", err)
 		}
 		for _, cr := range res.Commits {
-			out = append(out, fromSearchResult(cr))
+			cm := fromSearchResult(cr)
+			if needsDetail(q) {
+				owner, repo, ok := splitRepo(cm.Repo)
+				if !ok {
+					return nil, fmt.Errorf("invalid repo %q from search result", cm.Repo)
+				}
+				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
+					return nil, err
+				}
+			}
+			out = append(out, cm)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				break
+			}
 		}
 		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 			break
@@ -203,8 +217,8 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 		}
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
-			if q.IncludeStats {
-				if err := c.fillStats(ctx, owner, repo, &cm); err != nil {
+			if needsDetail(q) {
+				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
 					return nil, err
 				}
 			}
@@ -242,16 +256,62 @@ func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
 	return out, nil
 }
 
-func (c *Client) fillStats(ctx context.Context, owner, repo string, cm *model.Commit) error {
-	rc, _, err := c.gh.Repositories.GetCommit(ctx, owner, repo, cm.SHA, nil)
-	if err != nil {
-		return apiError(fmt.Sprintf("get commit stats %s/%s@%s", owner, repo, cm.SHA), err)
+func needsDetail(q model.Query) bool {
+	return q.IncludeStats || q.IncludeFiles || q.IncludeDiffs
+}
+
+func (c *Client) fillDetails(ctx context.Context, owner, repo string, cm *model.Commit, q model.Query) error {
+	opts := &github.ListOptions{PerPage: c.perPage}
+	var files []*github.CommitFile
+	needFiles := q.IncludeFiles || q.IncludeDiffs
+	for {
+		rc, resp, err := c.gh.Repositories.GetCommit(ctx, owner, repo, cm.SHA, opts)
+		if err != nil {
+			return apiError(fmt.Sprintf("get commit details %s/%s@%s", owner, repo, cm.SHA), err)
+		}
+		if s := rc.GetStats(); s != nil {
+			cm.Additions = s.GetAdditions()
+			cm.Deletions = s.GetDeletions()
+			cm.Changes = s.GetTotal()
+		}
+		if needFiles {
+			files = append(files, rc.Files...)
+		}
+		if resp.NextPage == 0 || !needFiles {
+			break
+		}
+		opts.Page = resp.NextPage
 	}
-	if s := rc.GetStats(); s != nil {
-		cm.Additions = s.GetAdditions()
-		cm.Deletions = s.GetDeletions()
+	if needFiles {
+		cm.Files = githubFiles(files, q)
+	}
+	if cm.Changes == 0 && (cm.Additions != 0 || cm.Deletions != 0) {
+		cm.Changes = cm.Additions + cm.Deletions
 	}
 	return nil
+}
+
+func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
+	out := make([]model.File, 0, len(files))
+	budget := q.MaxDiffBytes
+	if budget <= 0 {
+		budget = model.DefaultMaxDiffBytes
+	}
+	for _, f := range files {
+		mf := model.File{
+			Path:         f.GetFilename(),
+			PreviousPath: f.GetPreviousFilename(),
+			Status:       f.GetStatus(),
+			Additions:    f.GetAdditions(),
+			Deletions:    f.GetDeletions(),
+			Changes:      f.GetChanges(),
+		}
+		if q.IncludeDiffs {
+			mf.Patch, mf.PatchTruncated, budget = patch.ConsumePatchBudget(f.GetPatch(), budget)
+		}
+		out = append(out, mf)
+	}
+	return out
 }
 
 func buildSearchQuery(q model.Query) string {
