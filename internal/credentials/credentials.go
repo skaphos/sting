@@ -108,8 +108,14 @@ type CredentialRef struct {
 type store struct {
 	mu sync.RWMutex
 
-	// keyringSvc returns the service name used in the keyring for a host.
-	keyringSvc func(host string) string
+	// keyringSvc returns the service name used in the keyring for a (provider, host).
+	// It must incorporate both so that credentials for github.com and gitlab.com
+	// (or multiple GHES instances) never collide in the system keyring.
+	keyringSvc func(provider Provider, host string) string
+
+	// kr is the backend used for secure storage. It is normally the real
+	// (timeout-wrapped) keyring, but can be replaced for tests.
+	kr KeyringBackend
 
 	// insecurePath is the directory we use for plaintext fallback storage.
 	// We use ~/.config/sting/hosts.yml with the same logical structure as gh.
@@ -136,7 +142,8 @@ func New() (Store, error) {
 	}
 
 	s := &store{
-		keyringSvc:   func(host string) string { return "sting:" + host },
+		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
+		kr:           defaultKeyring{},
 		insecurePath: stingDir,
 	}
 
@@ -150,7 +157,8 @@ func New() (Store, error) {
 // plaintext storage (primarily for hermetic tests). It never touches GH_CONFIG_DIR.
 func WithFilePath(dir string) Store {
 	s := &store{
-		keyringSvc:   func(host string) string { return "sting:" + host },
+		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
+		kr:           defaultKeyring{},
 		insecurePath: dir,
 	}
 	_ = s.loadInsecureHosts()
@@ -163,6 +171,22 @@ type KeyringBackend interface {
 	Set(service, user, secret string) error
 	Get(service, user string) (string, error)
 	Delete(service, user string) error
+}
+
+// defaultKeyring is the production implementation that delegates to our
+// timeout-wrapped internal/keyring package.
+type defaultKeyring struct{}
+
+func (defaultKeyring) Set(service, user, secret string) error {
+	return keyring.Set(service, user, secret)
+}
+
+func (defaultKeyring) Get(service, user string) (string, error) {
+	return keyring.Get(service, user)
+}
+
+func (defaultKeyring) Delete(service, user string) error {
+	return keyring.Delete(service, user)
 }
 
 // compositeHost returns the key we use inside the ghconfig "hosts" map.
@@ -180,7 +204,7 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 	composite := compositeHost(provider, host)
 
 	// 1. Try secure storage first (keyring)
-	err := keyring.Set(s.keyringSvc(host), "", tok.AccessToken)
+	err := s.kr.Set(s.keyringSvc(provider, host), "", tok.AccessToken)
 	if err != nil {
 		if secureOnly {
 			return false, fmt.Errorf("secure storage required but failed: %w", err)
@@ -204,17 +228,22 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 		return true, nil
 	}
 
-	// Secure succeeded — clean up any stale insecure entry for this host
-	if s.hosts != nil {
-		if entry, ok := s.hosts[composite]; ok {
-			delete(entry, "oauth_token")
-			delete(entry, "user")
-			if len(entry) == 0 {
-				delete(s.hosts, composite)
-			}
-			_ = s.saveInsecureHosts()
-		}
+	// Secure succeeded.
+	// Ensure a marker entry exists in hosts.yml for this (provider, host) so that
+	// List() can report it (even though the actual secret lives only in the keyring).
+	// We deliberately do NOT store the token in the plaintext file.
+	if s.hosts == nil {
+		s.hosts = make(map[string]map[string]string)
 	}
+	if s.hosts[composite] == nil {
+		s.hosts[composite] = make(map[string]string)
+	}
+	// Remove any token that might have been there from a previous insecure save.
+	delete(s.hosts[composite], "oauth_token")
+	if tok.Username != "" {
+		s.hosts[composite]["user"] = tok.Username
+	}
+	_ = s.saveInsecureHosts()
 
 	return false, nil
 }
@@ -227,7 +256,7 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 	composite := compositeHost(provider, host)
 
 	// 1. Try keyring (secure) first
-	if tokStr, err := keyring.Get(s.keyringSvc(host), ""); err == nil && tokStr != "" {
+	if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), ""); err == nil && tokStr != "" {
 		return Token{
 			Type:        TokenTypeOAuth,
 			AccessToken: tokStr,
@@ -287,7 +316,7 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 	composite := compositeHost(provider, host)
 
 	// Best effort delete from both secure and insecure
-	_ = keyring.Delete(s.keyringSvc(host), "")
+	_ = s.kr.Delete(s.keyringSvc(provider, host), "")
 
 	if s.hosts != nil {
 		if entry, ok := s.hosts[composite]; ok {
@@ -315,21 +344,25 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 	}
 
 	for composite, entry := range s.hosts {
-		if tok := entry["oauth_token"]; tok != "" {
-			prov, h := ProviderGitHub, composite
-			if idx := len("github:"); len(composite) > idx && composite[:idx] == "github:" {
-				prov, h = ProviderGitHub, composite[idx:]
-			} else if idx := len("gitlab:"); len(composite) > idx && composite[:idx] == "gitlab:" {
-				prov, h = ProviderGitLab, composite[idx:]
-			}
-
-			refs = append(refs, CredentialRef{
-				Provider: prov,
-				Host:     h,
-				Username: entry["user"],
-				Source:   SourceFile,
-			})
+		prov, h := ProviderGitHub, composite
+		if idx := len("github:"); len(composite) > idx && composite[:idx] == "github:" {
+			prov, h = ProviderGitHub, composite[idx:]
+		} else if idx := len("gitlab:"); len(composite) > idx && composite[:idx] == "gitlab:" {
+			prov, h = ProviderGitLab, composite[idx:]
 		}
+
+		src := SourceFile
+		if entry["oauth_token"] == "" {
+			// Marker entry with no token in the file → the real credential is in the keyring.
+			src = SourceKeyring
+		}
+
+		refs = append(refs, CredentialRef{
+			Provider: prov,
+			Host:     h,
+			Username: entry["user"],
+			Source:   src,
+		})
 	}
 
 	return refs, nil
@@ -339,7 +372,16 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 // for the secure path (useful for hermetic tests). The insecure path still
 // uses our own file-based storage under the given directory.
 func WithKeyringForTest(backend KeyringBackend, configDir string) Store {
-	return WithFilePath(configDir)
+	if backend == nil {
+		backend = defaultKeyring{}
+	}
+	s := &store{
+		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
+		kr:           backend,
+		insecurePath: configDir,
+	}
+	_ = s.loadInsecureHosts()
+	return s
 }
 
 // --- Insecure hosts.yml handling (strictly scoped to Sting) ---
