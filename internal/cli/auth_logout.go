@@ -16,6 +16,8 @@ var authLogoutCmd = &cobra.Command{
 	Short: "Log out of a provider and remove stored credentials",
 	Long: `Remove stored authentication credentials for a provider.
 
+If no provider is given, GitHub is assumed.
+
 Use --hostname to log out of a specific GitHub Enterprise Server or GitLab instance.
 
 This removes the token from the secure keyring (preferred) and any

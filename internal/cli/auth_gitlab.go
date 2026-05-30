@@ -73,7 +73,6 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 	}
 
 	provider := credentials.ProviderGitLab
-	secureOnly := !authGitLabInsecure
 
 	if authGitLabWithToken {
 		scanner := bufio.NewScanner(cmd.InOrStdin())
@@ -92,7 +91,7 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("no token provided on stdin")
 		}
 
-		store, err := credentials.New()
+		store, err := credentialStoreForStorage(authGitLabInsecure)
 		if err != nil {
 			return fmt.Errorf("initialize credential store: %w", err)
 		}
@@ -102,7 +101,7 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 			AccessToken: token,
 		}
 
-		usedInsecure, err := store.Save(cmd.Context(), provider, hostname, cred, secureOnly)
+		usedInsecure, err := store.Save(cmd.Context(), provider, hostname, cred, false)
 		if err != nil {
 			return fmt.Errorf("failed to store GitLab token: %w", err)
 		}
@@ -216,7 +215,7 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 	username := fetchGitLabUsername(baseURL, tok.Token)
 
 	// Save the OAuth token (mirrors GitHub flow UX and storage behavior)
-	store, err := credentials.New()
+	store, err := credentialStoreForStorage(authGitLabInsecure)
 	if err != nil {
 		return fmt.Errorf("initialize credential store: %w", err)
 	}
@@ -227,7 +226,7 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 		Username:    username,
 	}
 
-	usedInsecure, err := store.Save(cmd.Context(), provider, hostname, cred, secureOnly)
+	usedInsecure, err := store.Save(cmd.Context(), provider, hostname, cred, false)
 	if err != nil {
 		return fmt.Errorf("failed to store GitLab token: %w", err)
 	}

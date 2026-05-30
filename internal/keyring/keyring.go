@@ -10,6 +10,7 @@ package keyring
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -60,7 +61,10 @@ func Get(service, user string) (string, error) {
 	select {
 	case res := <-ch:
 		if errors.Is(res.err, keyring.ErrNotFound) {
-			return "", ErrNotFound
+			// Wrap so callers can match both our sentinel
+			// (errors.Is(err, ErrNotFound)) and the underlying keyring error,
+			// as the doc comment promises.
+			return "", fmt.Errorf("%w: %w", ErrNotFound, res.err)
 		}
 		return res.val, res.err
 	case <-time.After(3 * time.Second):

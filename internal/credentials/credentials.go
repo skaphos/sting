@@ -25,6 +25,7 @@ package credentials
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,6 +37,11 @@ import (
 
 	"github.com/skaphos/sting/internal/keyring"
 )
+
+// errKeyringDisabled is the synthetic error used when no keyring backend is
+// configured (file-only mode). Save treats it like an ordinary keyring miss so
+// that it falls back to the plaintext file (or errors when secureOnly is set).
+var errKeyringDisabled = errors.New("keyring backend disabled")
 
 // Provider identifies a source control system.
 type Provider string
@@ -126,43 +132,68 @@ type store struct {
 	hosts map[string]map[string]string // composite -> {oauth_token, user, ...}
 }
 
+// defaultKeyringSvc returns the keyring service name for a (provider, host).
+// It incorporates both so that credentials for different providers/hosts
+// (e.g. github.com vs gitlab.com, or multiple GHES instances) never collide.
+func defaultKeyringSvc(p Provider, h string) string { return "sting:" + compositeHost(p, h) }
+
+// defaultStingDir returns ~/.config/sting, creating it if necessary.
+func defaultStingDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	stingDir := filepath.Join(home, ".config", "sting")
+	if err := os.MkdirAll(stingDir, 0700); err != nil {
+		return "", fmt.Errorf("cannot create sting config directory: %w", err)
+	}
+	return stingDir, nil
+}
+
+// newStore builds a store rooted at dir using the given keyring backend.
+// A nil backend means file-only mode: the secure keyring is never consulted,
+// which keeps behavior deterministic (used by NewInsecure and hermetic tests).
+func newStore(dir string, kr KeyringBackend) *store {
+	s := &store{
+		keyringSvc:   defaultKeyringSvc,
+		kr:           kr,
+		insecurePath: dir,
+	}
+	// Load existing insecure hosts (best effort)
+	_ = s.loadInsecureHosts()
+	return s
+}
+
 // New creates a Store using the default discovery order:
 // 1. Try secure keyring via our internal/keyring wrapper.
 // 2. Fall back to our own ~/.config/sting/hosts.yml (no env var mutation, no risk to gh config).
 // The returned Store is safe for concurrent use.
 func New() (Store, error) {
-	home, err := os.UserHomeDir()
+	dir, err := defaultStingDir()
 	if err != nil {
-		return nil, fmt.Errorf("cannot determine home directory: %w", err)
+		return nil, err
 	}
-
-	stingDir := filepath.Join(home, ".config", "sting")
-	if err := os.MkdirAll(stingDir, 0700); err != nil {
-		return nil, fmt.Errorf("cannot create sting config directory: %w", err)
-	}
-
-	s := &store{
-		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
-		kr:           defaultKeyring{},
-		insecurePath: stingDir,
-	}
-
-	// Load existing insecure hosts (best effort)
-	_ = s.loadInsecureHosts()
-
-	return s, nil
+	return newStore(dir, defaultKeyring{}), nil
 }
 
-// WithFilePath returns a Store that uses a specific directory for insecure
-// plaintext storage (primarily for hermetic tests). It never touches GH_CONFIG_DIR.
-func WithFilePath(dir string) Store {
-	s := &store{
-		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
-		kr:           defaultKeyring{},
-		insecurePath: dir,
+// NewInsecure creates a Store rooted at ~/.config/sting that never uses the
+// system keyring: credentials are always written to the plaintext hosts.yml.
+// This backs the `--insecure-storage` flag so it deterministically forces file
+// storage instead of merely permitting fallback.
+func NewInsecure() (Store, error) {
+	dir, err := defaultStingDir()
+	if err != nil {
+		return nil, err
 	}
-	_ = s.loadInsecureHosts()
-	return s
+	return newStore(dir, nil), nil
+}
+
+// WithFilePath returns a file-only Store that uses a specific directory for
+// plaintext storage (primarily for hermetic tests). It never consults the
+// system keyring and never touches GH_CONFIG_DIR, so test behavior is
+// deterministic regardless of whether a real keyring is available on the host.
+func WithFilePath(dir string) Store {
+	return newStore(dir, nil)
 }
 
 // KeyringBackend is the minimal interface we need from a keyring implementation.
@@ -203,8 +234,12 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 
 	composite := compositeHost(provider, host)
 
-	// 1. Try secure storage first (keyring)
-	err := s.kr.Set(s.keyringSvc(provider, host), "", tok.AccessToken)
+	// 1. Try secure storage first (keyring). A nil backend means file-only mode,
+	//    which we treat as a keyring miss so the fallback / secureOnly logic applies.
+	err := errKeyringDisabled
+	if s.kr != nil {
+		err = s.kr.Set(s.keyringSvc(provider, host), "", tok.AccessToken)
+	}
 	if err != nil {
 		if secureOnly {
 			return false, fmt.Errorf("secure storage required but failed: %w", err)
@@ -255,12 +290,14 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 
 	composite := compositeHost(provider, host)
 
-	// 1. Try keyring (secure) first
-	if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), ""); err == nil && tokStr != "" {
-		return Token{
-			Type:        TokenTypeOAuth,
-			AccessToken: tokStr,
-		}, SourceKeyring, nil
+	// 1. Try keyring (secure) first. Skipped entirely in file-only mode (nil backend).
+	if s.kr != nil {
+		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), ""); err == nil && tokStr != "" {
+			return Token{
+				Type:        TokenTypeOAuth,
+				AccessToken: tokStr,
+			}, SourceKeyring, nil
+		}
 	}
 
 	// 2. Fall back to our own insecure hosts.yml
@@ -315,8 +352,10 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 
 	composite := compositeHost(provider, host)
 
-	// Best effort delete from both secure and insecure
-	_ = s.kr.Delete(s.keyringSvc(provider, host), "")
+	// Best effort delete from both secure and insecure (keyring skipped in file-only mode)
+	if s.kr != nil {
+		_ = s.kr.Delete(s.keyringSvc(provider, host), "")
+	}
 
 	if s.hosts != nil {
 		if entry, ok := s.hosts[composite]; ok {
@@ -368,20 +407,12 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 	return refs, nil
 }
 
-// WithKeyringForTest returns a Store that uses the provided KeyringBackend
-// for the secure path (useful for hermetic tests). The insecure path still
-// uses our own file-based storage under the given directory.
+// WithKeyringForTest returns a Store that uses the provided KeyringBackend for
+// the secure path (useful for hermetic tests). A nil backend selects file-only
+// mode (no keyring), matching WithFilePath. The insecure path uses our own
+// file-based storage under the given directory.
 func WithKeyringForTest(backend KeyringBackend, configDir string) Store {
-	if backend == nil {
-		backend = defaultKeyring{}
-	}
-	s := &store{
-		keyringSvc:   func(p Provider, h string) string { return "sting:" + compositeHost(p, h) },
-		kr:           backend,
-		insecurePath: configDir,
-	}
-	_ = s.loadInsecureHosts()
-	return s
+	return newStore(configDir, backend)
 }
 
 // --- Insecure hosts.yml handling (strictly scoped to Sting) ---
@@ -424,7 +455,8 @@ func (s *store) saveInsecureHosts() error {
 	}
 
 	path := s.insecureHostsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
@@ -438,5 +470,27 @@ func (s *store) saveInsecureHosts() error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	// Write atomically: a temp file in the same directory followed by a rename,
+	// so a crash or a concurrent writer can never observe a half-written
+	// (security-sensitive) credentials file.
+	tmp, err := os.CreateTemp(dir, "hosts-*.yml.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
+
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpName, path)
 }

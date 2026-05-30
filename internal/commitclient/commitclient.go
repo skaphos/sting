@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/ghclient"
@@ -91,10 +92,16 @@ func gitlabHost(cfg config.Config) string {
 
 // credentialHost extracts a bare hostname from a base URL (for credential
 // storage keys). It is resilient to full API paths like
-// "https://ghe.example.com/api/v3" and bare hostnames.
+// "https://ghe.example.com/api/v3" as well as schemeless inputs like
+// "ghe.example.com" or "ghe.example.com/api/v3".
 func credentialHost(baseURL, defaultHost string) string {
 	if baseURL == "" {
 		return defaultHost
+	}
+	// url.Parse treats a schemeless input as a path, which leaves Hostname
+	// empty, so add a scheme when one is missing before parsing.
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "https://" + baseURL
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil {

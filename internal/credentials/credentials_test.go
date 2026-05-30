@@ -294,6 +294,42 @@ func TestCombinedKeyringAndFile(t *testing.T) {
 	}
 }
 
+// TestNewInsecureForcesFileBackend verifies that NewInsecure never consults the
+// system keyring: Save always falls back to the file (usedInsecure=true) and a
+// secureOnly Save fails deterministically, regardless of host keyring presence.
+func TestNewInsecureForcesFileBackend(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	s, err := NewInsecure()
+	if err != nil {
+		t.Fatalf("NewInsecure: %v", err)
+	}
+
+	tok := Token{Type: TokenTypeOAuth, AccessToken: "insecure-tok", Username: "carol"}
+	usedInsecure, err := s.Save(context.Background(), ProviderGitHub, "github.com", tok, false)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !usedInsecure {
+		t.Error("expected NewInsecure to always use the file backend")
+	}
+
+	got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.AccessToken != tok.AccessToken || src != SourceFile || got.Username != "carol" {
+		t.Errorf("expected file-backed roundtrip with username, got token=%q user=%q src=%s", got.AccessToken, got.Username, src)
+	}
+
+	// secureOnly must fail since there is no keyring backend at all.
+	if _, err := s.Save(context.Background(), ProviderGitLab, "gitlab.com", tok, true); err == nil {
+		t.Error("expected secureOnly Save to fail in file-only mode")
+	}
+}
+
 func TestConcurrentSaveLoad(t *testing.T) {
 	tmp := t.TempDir()
 	s := WithFilePath(tmp)

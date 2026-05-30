@@ -3,7 +3,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -15,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
-	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/internal/mcpinstall"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -631,6 +629,7 @@ func seedValidConfig(t *testing.T) {
 }
 
 func TestAuthStatusOutput_NoCredentials(t *testing.T) {
+	isolateHome(t) // hermetic: don't read/write the developer's real ~/.config/sting
 	cmd, out, _ := newCmd()
 
 	// Force a clean credential store for this test
@@ -838,10 +837,9 @@ func TestRunInit_AlreadyHasGitHub(t *testing.T) {
 }
 
 func TestInitSubcommandsExist(t *testing.T) {
-	// Verify the subcommand structure works
-	_, _, _ = newCmd()
-	initCmd.AddCommand(initGitHubCmd, initGitLabCmd) // ensure registered
-
+	// init.go's init() already registers these subcommands; re-adding them here
+	// would mutate global command state and risk duplicate registration under
+	// -shuffle. Just verify the expected structure.
 	if initGitHubCmd.Use != "github" || initGitLabCmd.Use != "gitlab" {
 		t.Error("expected github and gitlab subcommands under init")
 	}
@@ -938,8 +936,10 @@ func TestRunAuthStatus_WithStoredCredentials(t *testing.T) {
 }
 
 func TestRunAuthGitLab_WithToken(t *testing.T) {
-	// Isolate storage. Use --insecure-storage so the test is hermetic even
-	// when no keyring (org.freedesktop.secrets) is available in CI.
+	// Isolate storage. Use --insecure-storage so the token is deterministically
+	// written to the file backend (via NewInsecure) regardless of whether a real
+	// keyring is available on the host (e.g. macOS/Windows CI).
+	isolateHome(t)
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	origWithToken := authGitLabWithToken
@@ -1034,11 +1034,21 @@ func TestRunAuthGitLab_WithToken_EmptyInput(t *testing.T) {
 }
 
 func TestRunAuthStatus_MultipleHosts(t *testing.T) {
+	home := isolateHome(t)
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
-	store, _ := credentials.New()
-	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "github.com", credentials.Token{AccessToken: "main"}, false)
-	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "ghe.example.com", credentials.Token{AccessToken: "enterprise"}, false)
+	// Seed the isolated hosts.yml directly so the test is fully hermetic and
+	// never touches the system keyring (which is global, not HOME-scoped) — this
+	// matches what List()/status read after the keyring-isolation fixes.
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "main"
+  "github:ghe.example.com":
+    oauth_token: "enterprise"
+`
+	_ = os.WriteFile(filepath.Join(stingDir, "hosts.yml"), []byte(hosts), 0600)
 
 	cmd, out, _ := newCmd()
 	_ = runAuthStatus(cmd, nil)

@@ -65,6 +65,18 @@ func init() {
 	_ = authGitHubCmd.Flags().MarkHidden("client-secret")
 }
 
+// credentialStoreForStorage returns a credential store honoring the
+// --insecure-storage choice: when insecure is true it returns a file-only store
+// (NewInsecure) so the token is deterministically written to the plaintext
+// config file instead of the system keyring; otherwise it returns the default
+// store (keyring preferred, automatic file fallback).
+func credentialStoreForStorage(insecure bool) (credentials.Store, error) {
+	if insecure {
+		return credentials.NewInsecure()
+	}
+	return credentials.New()
+}
+
 //nolint:errcheck // fmt.Fprint* calls are for human CLI output; stdout write failures are not actionable here.
 func runAuthGitHub(cmd *cobra.Command, _ []string) error {
 	hostname := authGitHubHostname
@@ -173,8 +185,9 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 		}
 	}
 
-	// Save the credential
-	credStore, err := credentials.New()
+	// Save the credential. --insecure-storage forces file storage; otherwise the
+	// keyring is preferred with automatic fallback to the file (secureOnly=false).
+	credStore, err := credentialStoreForStorage(authGitHubInsecure)
 	if err != nil {
 		return fmt.Errorf("initialize credential store: %w", err)
 	}
@@ -185,7 +198,7 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 		Username:    username,
 	}
 
-	usedInsecure, err := credStore.Save(cmd.Context(), credentials.ProviderGitHub, hostname, cred, !authGitHubInsecure)
+	usedInsecure, err := credStore.Save(cmd.Context(), credentials.ProviderGitHub, hostname, cred, false)
 	if err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)
 	}
