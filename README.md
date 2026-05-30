@@ -169,7 +169,8 @@ go doc ./ghclient Client    # a specific type
 
 - [CHANGELOG.md](CHANGELOG.md) — notable changes.
 - [Architecture Decision Records](docs/adr/) — why the tool is shaped the way it
-  is (single-binary MCP+CLI, dedicated PAT, multi-runtime installer).
+  is (single-binary MCP+CLI, dedicated PAT, multi-runtime installer, release
+  ownership).
 - Per-package godoc — see the `go doc` commands above.
 
 ## Layout
