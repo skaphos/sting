@@ -70,7 +70,7 @@ Until the configuration support lands, you can still use `--with-token` to suppl
 
 Sting uses GitLab's native **Device Authorization Grant** flow (the same approach as `glab auth login --device`). This is the recommended path for CLIs.
 
-Sting ships with credentials for an official Skaphos OAuth App on gitlab.com, so `sting auth gitlab` works out of the box for the public service. For any self-hosted GitLab instance you must register your own application.
+Sting ships with credentials for an official Skaphos OAuth App on gitlab.com. The public app is registered as **non-confidential**, so only the Client ID is needed (`sting auth gitlab` works out of the box with no extra flags). For any self-hosted GitLab instance you must register your own application.
 
 ### Recommended Settings
 
@@ -79,7 +79,7 @@ Sting ships with credentials for an official Skaphos OAuth App on gitlab.com, so
 | **Name**                           | `Sting CLI` (or `MyOrg Sting CLI`)                     | Clear and descriptive |
 | **Redirect URI**                   | `http://127.0.0.1/callback` or `urn:ietf:wg:oauth:2.0:oob` | Required by the form; not used for pure device flow |
 | **Scopes**                         | `read_api` (minimum and recommended)                   | Sting only reads commit history. `api` also works. |
-| **Confidential**                   | Either (try **No** first)                              | Device flow works with both public and confidential apps |
+| **Confidential**                   | **No** (recommended for the public gitlab.com app)     | Non-confidential apps do not have a client secret. Confidential apps require a secret. |
 | **Device authorization grant flow**| **Enabled / Checked**                                  | **Critical** — this enables the flow Sting uses |
 
 ### Steps on GitLab.com
@@ -89,9 +89,10 @@ Sting ships with credentials for an official Skaphos OAuth App on gitlab.com, so
 3. Fill in the form using the table above.
 4. **Important**: Check the box labeled **Device authorization grant flow**.
 5. Select the `read_api` scope (or `api` if you prefer broader access).
-6. Click **Save application**.
-7. Copy the **Application ID** — this is your Client ID.
-8. (Optional) Copy the **Secret** if you created a confidential app and want to use `--client-secret`.
+6. Leave **Confidential** unchecked if you want the simplest experience (no client secret will be generated).
+7. Click **Save application**.
+8. Copy the **Application ID** — this is your Client ID.
+9. (Only for confidential apps) Copy the **Secret** if you need it for `--client-secret`.
 
 Then authenticate with:
 
@@ -112,13 +113,16 @@ The process is identical, but you perform it on your own instance.
 5. Fill in the form (same table as above).
 6. **Check "Device authorization grant flow"**.
 7. Select `read_api` scope.
-8. Save and copy the **Application ID** (Client ID).
+8. For the simplest setup, leave the app non-confidential (no secret generated).
+9. Save and copy the **Application ID** (Client ID).
 
 If the instance does not support device flow (older GitLab or the checkbox is missing), fall back to:
 
 ```bash
 echo 'glpat-xxxxxxxxxxxx' | sting auth gitlab --hostname gitlab.example.com --with-token
 ```
+
+Client secrets are only relevant when you deliberately create a confidential application. For normal use (including the public gitlab.com app) you only need the Client ID.
 
 ### Using Your Own App (Bring Your Own)
 

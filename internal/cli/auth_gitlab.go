@@ -24,18 +24,16 @@ var authGitLabCmd = &cobra.Command{
 	Long: `Authenticate with GitLab using OAuth (recommended).
 
 Official Skaphos/Sting OAuth App credentials are included, so this works out of the box
-for gitlab.com.
+for gitlab.com (no client secret required — the public app is registered as non-confidential).
 
 Self-hosted GitLab:
   Use --hostname to target your instance.
-  You will need to register your own OAuth Application on that instance
-  and pass the credentials using --client-id / --client-secret (or the corresponding
-  environment variables STING_GITLAB_CLIENT_ID / STING_GITLAB_CLIENT_SECRET).
+  You will need to register your own OAuth Application and pass at least --client-id
+  (or STING_GITLAB_CLIENT_ID). A client secret is only needed if you registered the
+  application as confidential.
 
   Example:
-    sting auth gitlab --hostname gitlab.example.com \
-      --client-id YOUR_CLIENT_ID \
-      --client-secret YOUR_CLIENT_SECRET
+    sting auth gitlab --hostname gitlab.example.com --client-id YOUR_CLIENT_ID
 
 By default uses the device authorization flow (no browser required on the machine running sting).
 Use --web to automatically open the verification page in your browser.
@@ -62,7 +60,7 @@ func init() {
 	authGitLabCmd.Flags().StringVar(&authGitLabHostname, "hostname", "", "GitLab hostname (default: gitlab.com)")
 	authGitLabCmd.Flags().BoolVar(&authGitLabWithToken, "with-token", false, "Read a Personal Access Token from standard input")
 	authGitLabCmd.Flags().StringVar(&authGitLabClientID, "client-id", "", "OAuth application Client ID (required for device flow)")
-	authGitLabCmd.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (usually not needed)")
+	authGitLabCmd.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (only needed for confidential apps)")
 	authGitLabCmd.Flags().BoolVarP(&authGitLabClipboard, "clipboard", "c", false, "Copy the user code to the clipboard")
 	authGitLabCmd.Flags().BoolVarP(&authGitLabWeb, "web", "w", false, "Open the verification URL in your browser automatically")
 	authGitLabCmd.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to the config file instead of the system keyring")
@@ -121,10 +119,10 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 
 	// Real Device Flow
 
-	// Official Skaphos/Sting OAuth App credentials for gitlab.com (safe to embed).
-	// These can be overridden with --client-id / --client-secret or the environment
-	// variables STING_GITLAB_CLIENT_ID / STING_GITLAB_CLIENT_SECRET (required for
-	// self-hosted GitLab instances).
+	// Official Skaphos/Sting OAuth App for gitlab.com (non-confidential).
+	// Only the Client ID is embedded. Client secrets are never defaulted and are
+	// only used when explicitly provided (for users who registered confidential
+	// apps on self-hosted instances).
 	clientID := authGitLabClientID
 	if clientID == "" {
 		clientID = os.Getenv("STING_GITLAB_CLIENT_ID")
@@ -137,28 +135,26 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 	if clientSecret == "" {
 		clientSecret = os.Getenv("STING_GITLAB_CLIENT_SECRET")
 	}
-	if clientSecret == "" {
-		clientSecret = "gloas-b56d1d3c8393e18123abbf53089c2d0af5edcf238575afe6c2981551d2a20126"
-	}
+	// clientSecret may remain empty — this is correct and expected for
+	// non-confidential GitLab applications.
 
-	// Self-hosted GitLab detection: if targeting anything other than gitlab.com and
-	// still using the default public credentials, give a clear actionable error.
+	// Self-hosted GitLab detection: if targeting anything other than gitlab.com
+	// while still using the built-in public Client ID, show a clear error.
 	isSelfHosted := hostname != "gitlab.com"
-	usingDefaultCreds := (authGitLabClientID == "" && os.Getenv("STING_GITLAB_CLIENT_ID") == "") &&
-		(authGitLabClientSecret == "" && os.Getenv("STING_GITLAB_CLIENT_SECRET") == "")
+	usingPublicApp := authGitLabClientID == "" && os.Getenv("STING_GITLAB_CLIENT_ID") == ""
 
-	if isSelfHosted && usingDefaultCreds {
+	if isSelfHosted && usingPublicApp {
 		return fmt.Errorf(`Self-hosted GitLab detected (%s).
 
 The built-in Skaphos credentials only work against gitlab.com.
 
-You need to register an OAuth Application on your instance and provide its credentials:
+You need to register an OAuth Application on your instance and provide its Client ID:
 
-  sting auth gitlab --hostname %s \
-    --client-id YOUR_CLIENT_ID \
-    --client-secret YOUR_CLIENT_SECRET
+  sting auth gitlab --hostname %s --client-id YOUR_CLIENT_ID
 
-See docs/oauth-app-registration.md for the exact settings (enable "Device authorization grant flow", use scope read_api).`, hostname, hostname)
+A --client-secret is only required if you registered the application as confidential.
+
+See docs/oauth-app-registration.md for the exact settings (you must enable "Device authorization grant flow" and use scope read_api).`, hostname, hostname)
 	}
 
 	baseURL := "https://" + hostname
