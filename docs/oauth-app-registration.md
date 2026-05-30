@@ -1,6 +1,6 @@
 # Registering OAuth Apps for Sting
 
-> **Status**: Draft (as of 2026-05-30). This guide will be finalized alongside the OAuth authentication feature (SKA-466).
+> **Status**: Draft (as of 2026-05-30). This guide is being updated in parallel with the OAuth implementation (SKA-466).
 
 Sting supports two authentication methods:
 
@@ -9,7 +9,7 @@ Sting supports two authentication methods:
 
 This guide explains how to register an OAuth App so Sting can use modern OAuth-based login (similar to `gh auth login` and `glab auth login --device`).
 
-Sting will ship with credentials for an **official Skaphos-published OAuth App** for convenience on github.com and gitlab.com. You can (and often should) register and use your own app instead.
+Sting ships with credentials for an **official Skaphos-published OAuth App** on github.com. For GitLab (gitlab.com and self-hosted) you register your own application (or use `--with-token` as an immediate fallback). You can always register and use your own app on any provider.
 
 ## Why Register an OAuth App?
 
@@ -68,29 +68,67 @@ Until the configuration support lands, you can still use `--with-token` to suppl
 
 ## GitLab (gitlab.com and self-hosted)
 
-GitLab has excellent native support for the device authorization flow.
+Sting uses GitLab's native **Device Authorization Grant** flow (the same approach as `glab auth login --device`). This is the recommended path for CLIs.
+
+There is currently no baked-in Skaphos public OAuth App for GitLab.com. You must create an application and pass its Client ID (via `--client-id` or the `STING_GITLAB_CLIENT_ID` environment variable).
 
 ### Recommended Settings
 
-| Field                    | Recommended Value                          | Notes |
-|--------------------------|--------------------------------------------|-------|
-| **Name**                 | `Sting CLI` (or `MyOrg Sting`)             | — |
-| **Redirect URI**         | `http://127.0.0.1/callback`                | Used for web fallback |
-| **Scopes**               | `api`, `read_repository`, `write_repository` (minimum) | Adjust based on your needs |
-| **Confidential**         | **No** (public client)                     | Required for device flow in many setups |
+| Field                              | Recommended Value                                      | Notes |
+|------------------------------------|--------------------------------------------------------|-------|
+| **Name**                           | `Sting CLI` (or `MyOrg Sting CLI`)                     | Clear and descriptive |
+| **Redirect URI**                   | `http://127.0.0.1/callback` or `urn:ietf:wg:oauth:2.0:oob` | Required by the form; not used for pure device flow |
+| **Scopes**                         | `read_api` (minimum and recommended)                   | Sting only reads commit history. `api` also works. |
+| **Confidential**                   | Either (try **No** first)                              | Device flow works with both public and confidential apps |
+| **Device authorization grant flow**| **Enabled / Checked**                                  | **Critical** — this enables the flow Sting uses |
 
 ### Steps on GitLab.com
 
-1. Go to **User Settings → Applications** (or for group-level: group → Settings → Applications).
+1. Go to **User Settings → Applications** (or for a group: the group → **Settings → Applications**).
 2. Click **Add new application**.
-3. Fill in the form.
-4. **Do not** check "Confidential".
-5. Check the appropriate scopes.
-6. Save and note the **Application ID** (Client ID) and **Secret**.
+3. Fill in the form using the table above.
+4. **Important**: Check the box labeled **Device authorization grant flow**.
+5. Select the `read_api` scope (or `api` if you prefer broader access).
+6. Click **Save application**.
+7. Copy the **Application ID** — this is your Client ID.
+8. (Optional) Copy the **Secret** if you created a confidential app and want to use `--client-secret`.
+
+Then authenticate with:
+
+```bash
+sting auth gitlab --client-id <YOUR_APPLICATION_ID>
+# or for a self-hosted instance:
+sting auth gitlab --hostname gitlab.example.com --client-id <YOUR_ID>
+```
 
 ### Steps on Self-Hosted GitLab
 
-The process is identical to GitLab.com but performed on your instance (`https://gitlab.example.com/-/user_settings/applications` or the equivalent admin/group path).
+The process is identical, but you perform it on your own instance.
+
+1. Log into your GitLab instance.
+2. Go to your profile → **User Settings → Applications**, or the equivalent group/admin path.
+3. Use the URL pattern: `https://gitlab.example.com/-/user_settings/applications`
+4. Click **Add new application**.
+5. Fill in the form (same table as above).
+6. **Check "Device authorization grant flow"**.
+7. Select `read_api` scope.
+8. Save and copy the **Application ID** (Client ID).
+
+If the instance does not support device flow (older GitLab or the checkbox is missing), fall back to:
+
+```bash
+echo 'glpat-xxxxxxxxxxxx' | sting auth gitlab --hostname gitlab.example.com --with-token
+```
+
+### Using Your Own App (Bring Your Own)
+
+This is the normal path for GitLab today:
+
+- Use `--client-id` (and optionally `--client-secret`) on the command line.
+- Or set the environment variables `STING_GITLAB_CLIENT_ID` and `STING_GITLAB_CLIENT_SECRET`.
+- These can be different per host when using `--hostname`.
+
+This model is intentional and matches how most teams use `glab` with self-hosted GitLab. Organizations with strict requirements can register their own apps with custom names, scopes, and audit trails.
 
 ## Scopes Sting Needs
 
@@ -102,10 +140,10 @@ Sting only **reads** data. The following scopes are typically sufficient:
 - `gist` (optional, for some future features)
 
 **GitLab**:
-- `api` (broad but convenient)
-- Or the more granular `read_repository` + `read_user` etc.
+- `read_api` (recommended — read-only access to the API, sufficient for commit history)
+- `api` (broader, also works)
 
-You can start minimal and expand later. Sting will surface clear errors if required scopes are missing.
+Sting requests the minimal scope needed (`read_api` for GitLab, `repo` + `read:org` for GitHub). You can start with the smallest scope and expand later. Sting will surface clear errors if required scopes are missing.
 
 ## Security Considerations
 
@@ -121,13 +159,15 @@ You can start minimal and expand later. Sting will surface clear errors if requi
 
 ## Next Steps / Status
 
-This guide is being developed in parallel with the OAuth implementation (Linear SKA-466 / SKA-467).
+- GitHub OAuth (with public Skaphos app + GHES bring-your-own) is fully implemented and documented.
+- GitLab OAuth device flow is implemented (no public Skaphos app yet; users register their own or use `--with-token`).
+- This registration guide is being kept in sync with the code (see `sting auth gitlab --help` and the error messages for the latest instructions).
 
 See also:
 - [ADR 0007: OAuth App authentication and multi-provider credential storage](adr/0007-oauth-app-authentication.md)
-- Main README (authentication section will be updated)
+- Main README (authentication section will be updated when the feature is more widely announced)
 
-Feedback and improvements to this draft are welcome.
+Feedback and improvements are welcome.
 
 ---
 

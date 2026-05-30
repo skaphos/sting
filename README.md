@@ -76,6 +76,29 @@ GitLab.com is the default. For self-managed GitLab, point `gitlab_base_url` (or
 gitlab_base_url: https://gitlab.example.com/api/v4/
 ```
 
+### Modern authentication (recommended)
+
+Instead of manually managing tokens, use the interactive OAuth flows:
+
+```sh
+# GitHub (uses a public Skaphos app on github.com)
+sting auth github
+sting auth github --hostname ghe.example.com   # GHES with your own app
+
+# GitLab (device flow, same as glab)
+sting auth gitlab --client-id <YOUR_APP_ID>
+sting auth gitlab --hostname gitlab.example.com --client-id <YOUR_APP_ID>
+
+# Legacy PAT fallback (still fully supported)
+echo 'glpat-xxxx' | sting auth gitlab --with-token
+```
+
+See `sting auth --help` and [docs/oauth-app-registration.md](docs/oauth-app-registration.md)
+for how to create the required OAuth applications (especially the
+"Device authorization grant flow" checkbox on GitLab).
+
+`sting auth status` and `sting auth logout` are also available.
+
 ## Agent integration (the main use case)
 
 Register the MCP server with every detected runtime:
