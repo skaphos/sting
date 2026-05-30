@@ -136,8 +136,7 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 				fmt.Fprintln(cmd.OutOrStdout(), "  (copied to clipboard)")
 			}
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Press Enter to open %s in your browser...\n", verificationURL)
-		_, _ = fmt.Scanln()
+		fmt.Fprintf(cmd.OutOrStdout(), "Open %s in your browser to authorize.\n", verificationURL)
 		return nil
 	}
 

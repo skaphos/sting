@@ -162,9 +162,13 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 	deviceURL := baseURL + "/oauth/authorize_device"
 	tokenURL := baseURL + "/oauth/token"
 
+	// Use a client with timeout instead of http.DefaultClient to avoid indefinite hangs
+	// on slow DNS/TLS or unresponsive device endpoints (as flagged in review).
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Requesting device code for %s...\n", hostname)
 
-	code, err := device.RequestCode(http.DefaultClient, deviceURL, clientID, []string{"read_api"})
+	code, err := device.RequestCode(httpClient, deviceURL, clientID, []string{"read_api"})
 	if err != nil {
 		if err == device.ErrUnsupported {
 			return fmt.Errorf("this GitLab instance does not support device flow; use --with-token instead")
@@ -196,7 +200,8 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 	fmt.Fprintln(cmd.OutOrStdout(), "Waiting for authorization...")
 
 	// Use the command context so the user can cancel the wait (Ctrl-C).
-	tok, err := device.Wait(cmd.Context(), http.DefaultClient, tokenURL, device.WaitOptions{
+	// The same timeout-configured client is used for the polling requests.
+	tok, err := device.Wait(cmd.Context(), httpClient, tokenURL, device.WaitOptions{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		DeviceCode:   code,

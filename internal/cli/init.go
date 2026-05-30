@@ -69,7 +69,7 @@ func runInitGitLab(cmd *cobra.Command, _ []string) error {
 //nolint:errcheck // All fmt.Fprint* calls here are for human CLI output to cmd.OutOrStdout(); failure to write to stdout is not actionable in a CLI wizard.
 func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 	out := cmd.OutOrStdout()
-	in := bufio.NewReader(os.Stdin)
+	in := bufio.NewReader(cmd.InOrStdin())
 
 	fmt.Fprintln(out, "Welcome to Sting!")
 	fmt.Fprintln(out)
