@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+
+//nolint:errcheck // This file is the interactive auth/init wizard; virtually all output is human-facing fmt.Fprint* to Cobra's OutOrStdout(). Write failures to stdout are not actionable in a CLI.
 package cli
 
 import (
@@ -64,6 +66,7 @@ func runInitGitLab(cmd *cobra.Command, _ []string) error {
 	return runProviderInit(cmd, credentials.ProviderGitLab)
 }
 
+//nolint:errcheck // All fmt.Fprint* calls here are for human CLI output to cmd.OutOrStdout(); failure to write to stdout is not actionable in a CLI wizard.
 func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 	out := cmd.OutOrStdout()
 	in := bufio.NewReader(os.Stdin)
@@ -122,6 +125,7 @@ func runProviderInit(cmd *cobra.Command, provider credentials.Provider) error {
 	}
 }
 
+//nolint:errcheck
 func printFinalSummary(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "All set!")
@@ -130,6 +134,7 @@ func printFinalSummary(out io.Writer) {
 	fmt.Fprintln(out, "  sting install          # optional: register with your agents")
 }
 
+//nolint:errcheck
 func prompt(in *bufio.Reader) string {
 	fmt.Print("> ")
 	text, _ := in.ReadString('\n')

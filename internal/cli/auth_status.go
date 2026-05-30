@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+
+//nolint:errcheck // CLI status output uses fmt.Fprint* to Cobra streams; write errors are not actionable.
 package cli
 
 import (

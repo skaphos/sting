@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package credentials provides secure (preferred) + plaintext (fallback)
 // storage for Sting authentication material.
 //
@@ -162,7 +164,6 @@ type KeyringBackend interface {
 	Get(service, user string) (string, error)
 	Delete(service, user string) error
 }
-
 
 // compositeHost returns the key we use inside the ghconfig "hosts" map.
 // Using "provider:host" keeps GitHub and GitLab (and multiple GHES instances) cleanly separated

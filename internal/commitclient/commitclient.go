@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	"github.com/skaphos/sting/config"
-	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/ghclient"
 	"github.com/skaphos/sting/gitlabclient"
+	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/model"
 )
 

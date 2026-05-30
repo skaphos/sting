@@ -66,6 +66,7 @@ func init() {
 	_ = authGitHubCmd.Flags().MarkHidden("client-secret")
 }
 
+//nolint:errcheck // fmt.Fprint* calls are for human CLI output; stdout write failures are not actionable here.
 func runAuthGitHub(cmd *cobra.Command, _ []string) error {
 	hostname := authGitHubHostname
 	if hostname == "" {
@@ -99,9 +100,9 @@ func runAuthGitHub(cmd *cobra.Command, _ []string) error {
 		(authGitHubClientSecret == "" && os.Getenv("STING_GITHUB_CLIENT_SECRET") == "")
 
 	if isEnterprise && usingDefaultCreds {
-		return fmt.Errorf(`GitHub Enterprise Server detected (%s).
-
-The built-in Skaphos credentials only work against github.com.
+		//lint:ignore ST1005 user-facing CLI error with proper punctuation and newlines
+		//nolint:staticcheck // ST1005
+		return fmt.Errorf(`GitHub Enterprise Server detected (%s) — built-in Skaphos credentials only work against github.com.
 
 You need to register an OAuth App on your GHES instance and provide its credentials:
 

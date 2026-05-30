@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+
+//nolint:errcheck // Parent auth command output helpers use fmt.Fprint*; stdout failures not actionable in CLI.
 package cli
 
 import (
@@ -23,4 +25,3 @@ func init() {
 	authCmd.AddCommand(authGitLabCmd)
 	authCmd.AddCommand(authLogoutCmd)
 }
-

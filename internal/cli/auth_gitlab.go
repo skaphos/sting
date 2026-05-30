@@ -66,6 +66,7 @@ func init() {
 	authGitLabCmd.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to the config file instead of the system keyring")
 }
 
+//nolint:errcheck // fmt.Fprint* calls are for human CLI output; stdout write failures are not actionable here.
 func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 	hostname := authGitLabHostname
 	if hostname == "" {
@@ -144,9 +145,9 @@ func runAuthGitLab(cmd *cobra.Command, _ []string) error {
 	usingPublicApp := authGitLabClientID == "" && os.Getenv("STING_GITLAB_CLIENT_ID") == ""
 
 	if isSelfHosted && usingPublicApp {
-		return fmt.Errorf(`Self-hosted GitLab detected (%s).
-
-The built-in Skaphos credentials only work against gitlab.com.
+		//lint:ignore ST1005 user-facing CLI error with proper punctuation and newlines
+		//nolint:staticcheck // ST1005
+		return fmt.Errorf(`Self-hosted GitLab detected (%s) — built-in Skaphos credentials only work against gitlab.com.
 
 You need to register an OAuth Application on your instance and provide its Client ID:
 
@@ -166,7 +167,7 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 	code, err := device.RequestCode(http.DefaultClient, deviceURL, clientID, []string{"read_api"})
 	if err != nil {
 		if err == device.ErrUnsupported {
-			return fmt.Errorf("this GitLab instance does not support device flow. Use --with-token instead.")
+			return fmt.Errorf("this GitLab instance does not support device flow; use --with-token instead")
 		}
 		return fmt.Errorf("failed to request device code: %w", err)
 	}
@@ -262,7 +263,7 @@ func fetchGitLabUsername(baseURL, accessToken string) string {
 	if err != nil {
 		return ""
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // defer cannot easily check close error; body close failure is non-fatal for our use case
 
 	if resp.StatusCode != http.StatusOK {
 		return ""

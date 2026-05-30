@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package keyring is a thin wrapper around github.com/zalando/go-keyring
 // that adds timeouts (matching the pattern used by the official GitHub CLI)
 // and provides mock helpers for testing.
