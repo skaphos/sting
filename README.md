@@ -19,9 +19,20 @@ ambient provider tokens.
 ## Install
 
 ```sh
+brew tap skaphos/tools https://github.com/skaphos/homebrew-tools
+brew install --cask skaphos/tools/sting
+```
+
+Or install from source:
+
+```sh
 go install github.com/skaphos/sting/cmd/sting@latest
-# or, in this repo:
-task build      # -> ./bin/sting
+```
+
+Or build from this repo:
+
+```sh
+go -C tools tool task build      # -> ./bin/sting
 ```
 
 ## Authentication
