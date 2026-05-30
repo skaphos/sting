@@ -17,6 +17,10 @@ to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- GitLab provider support for repository and group-scoped commit queries via
+  `--provider gitlab`, `gitlab_token` / `STING_GITLAB_TOKEN`, and
+  `gitlab_base_url` / `STING_GITLAB_BASE_URL`. GitLab `search` scope is not
+  supported in this first pass; use `repos` or `org`.
 - Query a GitHub user's commits over a time window, as a local CLI
   (`sting --author <user> --window <window>`) or as an MCP server (`sting mcp`)
   exposing a single read-only `get_commits` tool over stdio.

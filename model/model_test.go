@@ -3,6 +3,25 @@ package model
 
 import "testing"
 
+func TestProviderValid(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		want     bool
+	}{
+		{"github", ProviderGitHub, true},
+		{"gitlab", ProviderGitLab, true},
+		{"invalid", Provider("bogus"), false},
+		{"empty", Provider(""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.provider.Valid(); got != tc.want {
+				t.Errorf("Provider(%q).Valid() = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestScopeValid(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

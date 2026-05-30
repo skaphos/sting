@@ -2,8 +2,11 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/skaphos/sting/model"
 )
 
 func TestParseWindow(t *testing.T) {
@@ -50,5 +53,17 @@ func TestParseTime(t *testing.T) {
 	}
 	if _, err := ParseTime("nope"); err == nil {
 		t.Error("invalid form: want error")
+	}
+}
+
+func TestValidateProvider(t *testing.T) {
+	cfg := Default()
+	cfg.DefaultProvider = model.Provider("bogus")
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate: want error for invalid provider")
+	}
+	if !strings.Contains(err.Error(), "invalid provider") {
+		t.Fatalf("Validate error = %q, want invalid provider", err)
 	}
 }

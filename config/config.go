@@ -2,7 +2,7 @@
 // Package config defines the tool's settings and the flexible time-window
 // parsing used to bound a query. Loading and source precedence (config file,
 // environment, flags) is handled by viper in the CLI layer; this package stays
-// dependency-light so the GitHub client and renderers can rely on it.
+// dependency-light so provider clients and renderers can rely on it.
 package config
 
 import (
@@ -18,6 +18,8 @@ import (
 // configuration keys: they are the YAML/JSON config-file keys, the viper keys
 // bound to flags, and (uppercased, STING_-prefixed) the environment variables.
 type Config struct {
+	// DefaultProvider is used when a query omits a provider.
+	DefaultProvider model.Provider `mapstructure:"provider"`
 	// Token is the GitHub personal access token sting authenticates with. It is
 	// deliberately sting's own key (config-file "token" or env STING_TOKEN), kept
 	// separate from the ambient GITHUB_TOKEN so a dedicated read-only PAT can be
@@ -26,6 +28,13 @@ type Config struct {
 	// BaseURL points at a GitHub Enterprise API root
 	// ("https://ghe.example.com/api/v3/"). Empty means public github.com.
 	BaseURL string `mapstructure:"base_url"`
+	// GitLabToken is the GitLab personal access token sting authenticates with.
+	// It is kept separate from both GITHUB_TOKEN and ambient GitLab env vars such
+	// as GITLAB_TOKEN.
+	GitLabToken string `mapstructure:"gitlab_token"`
+	// GitLabBaseURL points at a GitLab API v4 root
+	// ("https://gitlab.example.com/api/v4/"). Empty means GitLab.com.
+	GitLabBaseURL string `mapstructure:"gitlab_base_url"`
 	// DefaultScope is used when a query omits a scope.
 	DefaultScope model.Scope `mapstructure:"default_scope"`
 	// DefaultWindow is the look-back window when a query omits since/until.
@@ -49,33 +58,40 @@ type Config struct {
 // precedence resolution.
 func Defaults() map[string]any {
 	return map[string]any{
-		"token":          "",
-		"base_url":       "",
-		"default_scope":  string(model.ScopeSearch),
-		"default_window": "7d",
-		"default_repos":  []string{},
-		"default_org":    "",
-		"default_format": "markdown",
-		"per_page":       100,
-		"max_commits":    0,
-		"include_stats":  false,
+		"provider":        string(model.ProviderGitHub),
+		"token":           "",
+		"base_url":        "",
+		"gitlab_token":    "",
+		"gitlab_base_url": "",
+		"default_scope":   string(model.ScopeSearch),
+		"default_window":  "7d",
+		"default_repos":   []string{},
+		"default_org":     "",
+		"default_format":  "markdown",
+		"per_page":        100,
+		"max_commits":     0,
+		"include_stats":   false,
 	}
 }
 
 // Default returns the built-in configuration as a Config value.
 func Default() Config {
 	return Config{
-		DefaultScope:  model.ScopeSearch,
-		DefaultWindow: "7d",
-		DefaultFormat: "markdown",
-		PerPage:       100,
-		MaxCommits:    0,
-		IncludeStats:  false,
+		DefaultProvider: model.ProviderGitHub,
+		DefaultScope:    model.ScopeSearch,
+		DefaultWindow:   "7d",
+		DefaultFormat:   "markdown",
+		PerPage:         100,
+		MaxCommits:      0,
+		IncludeStats:    false,
 	}
 }
 
 // Validate checks that the resolved configuration is internally consistent.
 func (cfg Config) Validate() error {
+	if cfg.DefaultProvider != "" && !cfg.DefaultProvider.Valid() {
+		return fmt.Errorf("invalid provider %q (want github|gitlab)", cfg.DefaultProvider)
+	}
 	if cfg.DefaultScope != "" && !cfg.DefaultScope.Valid() {
 		return fmt.Errorf("invalid default_scope %q (want search|repos|org)", cfg.DefaultScope)
 	}

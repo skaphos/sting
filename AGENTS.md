@@ -1,20 +1,22 @@
 # Repository Guidelines
 
-sting queries a GitHub user's commits over a time window, as a local CLI or as
-an MCP server exposing a single read-only `get_commits` tool. It is read-only by
-design and uses a dedicated GitHub PAT kept separate from the ambient
-`GITHUB_TOKEN`.
+sting queries a GitHub or GitLab user's commits over a time window, as a local
+CLI or as an MCP server exposing a single read-only `get_commits` tool. It is
+read-only by design and uses dedicated provider PATs kept separate from ambient
+provider tokens.
 
 ## Project Structure & Module Organization
 
 Public packages (importable; the evidence contract — see
 [ADR 0004](docs/adr/0004-public-packages-and-wake-evidence.md)):
 
-- `model/`: domain types (`Commit`, `Query`, `Result`, `Scope`) and the
+- `model/`: domain types (`Commit`, `Provider`, `Query`, `Result`, `Scope`) and the
   `Result` `SchemaVersion`. Leaf package, no internal deps.
 - `config/`: `Config`, viper keys, window/time parsing, and `Resolve`
   (request → validated `model.Query`).
 - `ghclient/`: go-github wrapper, scope dispatch (search/repos/org), and
+  normalization into `model` types.
+- `gitlabclient/`: GitLab REST wrapper, scope dispatch (repos/org), and
   normalization into `model` types.
 
 Application layer (internal):
@@ -22,6 +24,7 @@ Application layer (internal):
 - `cmd/sting/`: thin entrypoint that boots `internal/cli`.
 - `internal/cli/`: Cobra command tree (`query`, `mcp`, `install`, `uninstall`,
   `version`) and viper wiring.
+- `internal/commitclient/`: provider client selection shared by CLI and MCP.
 - `internal/mcpserver/`: MCP server; the read-only `get_commits` tool.
 - `internal/mcpinstall/`: per-runtime install adapters (Claude, Codex, OpenCode,
   Grok) with atomic, format-preserving config writes.
@@ -65,19 +68,21 @@ Tasks run without globally installing tools (Task is pinned in `tools/`):
 - Keep cognitive load low: small functions, clear names, early returns, simple
   control flow over clever abstractions.
 - Comment the why (invariants, edge cases, non-obvious tradeoffs), not the what.
-- Keep the public packages (`model`, `config`, `ghclient`) a deliberate, minimal
-  API surface; breaking changes to `Commit`/`Result` must bump
+- Keep the public packages (`model`, `config`, `ghclient`, `gitlabclient`) a
+  deliberate, minimal API surface; breaking changes to `Commit`/`Result` must bump
   `model.SchemaVersion`.
 
 ## Safety Notes (read-only by design)
 
-- sting only reads from GitHub. Do not add tools or commands that mutate
+- sting only reads from GitHub and GitLab. Do not add tools or commands that mutate
   repositories, issues, or any remote state.
 - `get_commits` is annotated `ReadOnlyHint: true`; `mcpserver.ReadOnlyTools()`
   is the single source of truth the installer's auto-approve list derives from.
   Keep that invariant — every exposed tool must be read-only.
-- Authentication uses sting's own PAT (`token` / `STING_TOKEN`), intentionally
-  separate from `GITHUB_TOKEN`. Do not start reading `GITHUB_TOKEN`.
+- Authentication uses sting's own PAT keys (`token` / `STING_TOKEN` for GitHub,
+  `gitlab_token` / `STING_GITLAB_TOKEN` for GitLab), intentionally separate
+  from ambient provider tokens. Do not start reading `GITHUB_TOKEN` or
+  `GITLAB_TOKEN`.
 - The installer writes only sting's entry, preserves other keys, and writes
   atomically. Do not add behavior that rewrites whole config files.
 

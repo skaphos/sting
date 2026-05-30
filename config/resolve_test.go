@@ -19,6 +19,9 @@ func TestResolveDefaults(t *testing.T) {
 	if q.Author != "mfacenet" {
 		t.Errorf("author = %q", q.Author)
 	}
+	if q.Provider != model.ProviderGitHub {
+		t.Errorf("provider = %q, want default github", q.Provider)
+	}
 	if q.Scope != model.ScopeSearch {
 		t.Errorf("scope = %q, want default search", q.Scope)
 	}
@@ -79,6 +82,38 @@ func TestResolveSinceAfterUntil(t *testing.T) {
 func TestResolveInvalidScope(t *testing.T) {
 	if _, err := Default().Resolve(Request{Author: "x", Scope: "bogus"}, time.Now()); err == nil {
 		t.Fatal("want error for invalid scope")
+	}
+}
+
+func TestResolveExplicitProvider(t *testing.T) {
+	q, err := Default().Resolve(Request{
+		Provider: "gitlab",
+		Author:   "x",
+		Scope:    "repos",
+		Repos:    []string{"skaphos/sting"},
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if q.Provider != model.ProviderGitLab {
+		t.Errorf("provider = %q, want gitlab", q.Provider)
+	}
+}
+
+func TestResolveInvalidProvider(t *testing.T) {
+	if _, err := Default().Resolve(Request{Provider: "bogus", Author: "x"}, time.Now()); err == nil {
+		t.Fatal("want error for invalid provider")
+	}
+}
+
+func TestResolveGitLabSearchUnsupported(t *testing.T) {
+	_, err := Default().Resolve(Request{
+		Provider: "gitlab",
+		Author:   "x",
+		Scope:    "search",
+	}, time.Now())
+	if err == nil {
+		t.Fatal("want error for gitlab search")
 	}
 }
 
