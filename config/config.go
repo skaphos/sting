@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 // Config holds all tunable settings. The mapstructure keys are the canonical

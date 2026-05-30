@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skaphos/sting/internal/config"
-	"github.com/skaphos/sting/internal/ghclient"
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/ghclient"
+	"github.com/skaphos/sting/model"
 )
 
 // firstText returns the text of the first TextContent in res, or "" if none.

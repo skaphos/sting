@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/model"
 )
 
 // Request is the raw, mostly-string input from a CLI invocation or an MCP tool

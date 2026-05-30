@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/skaphos/sting/internal/config"
-	"github.com/skaphos/sting/internal/ghclient"
-	"github.com/skaphos/sting/internal/model"
+	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/ghclient"
 	"github.com/skaphos/sting/internal/render"
+	"github.com/skaphos/sting/model"
 )
 
 // GetCommitsInput is the argument schema for the get_commits tool. The
