@@ -4,16 +4,27 @@ package credentials
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 )
 
+// failingKeyring is a test backend that never succeeds, forcing the insecure fallback path.
+type failingKeyring struct{}
+
+func (failingKeyring) Set(service, user, secret string) error {
+	return errors.New("no keyring in test")
+}
+func (failingKeyring) Get(service, user string) (string, error) { return "", errors.New("no keyring") }
+func (failingKeyring) Delete(service, user string) error        { return nil }
+
 func TestNewAndBasicSaveLoad(t *testing.T) {
 	tmp := t.TempDir()
 	f := tmp
 
-	s := WithFilePath(f)
+	// Force insecure path for hermeticity (WithFilePath alone may still try real keyring).
+	s := WithKeyringForTest(failingKeyring{}, f)
 
 	tok := Token{
 		Type:        TokenTypeOAuth,

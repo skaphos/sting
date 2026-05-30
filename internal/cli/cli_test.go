@@ -787,7 +787,13 @@ func TestMustNoPanic(t *testing.T) {
 }
 
 func TestRunInit(t *testing.T) {
+	isolateHome(t) // hermetic: no real HOME, no real keyring/config
+
+	// Provide answers to any prompts (auth? no; install? no) so we never
+	// attempt real OAuth flows or touch external state.
 	cmd, out, _ := newCmd()
+	cmd.SetIn(strings.NewReader("n\nn\n"))
+
 	err := runInit(cmd, nil)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
@@ -799,14 +805,35 @@ func TestRunInit(t *testing.T) {
 }
 
 func TestRunInit_AlreadyHasGitHub(t *testing.T) {
-	// Basic smoke test for the already-authenticated GitHub path.
+	home := isolateHome(t) // hermetic
+
+	// Seed a GitHub credential directly into the isolated sting hosts.yml
+	// so the "already authenticated" branch is taken deterministically
+	// without any prompts or network.
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hostsPath := filepath.Join(stingDir, "hosts.yml")
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "gho_seeded123"
+    user: "octocat"
+`
+	_ = os.WriteFile(hostsPath, []byte(hosts), 0600)
+
 	cmd, out, _ := newCmd()
+	// Answer "n" to the (optional) install prompt that offerInstall may ask
+	// even on the "already has creds" path.
+	cmd.SetIn(strings.NewReader("n\n"))
+
 	err := runInit(cmd, nil)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 	if !strings.Contains(out.String(), "Welcome to Sting") {
 		t.Errorf("expected welcome message")
+	}
+	if !strings.Contains(out.String(), "GitHub credentials found") {
+		t.Errorf("expected 'already has GitHub' path, got:\n%s", out.String())
 	}
 }
 
@@ -821,9 +848,16 @@ func TestInitSubcommandsExist(t *testing.T) {
 }
 
 func TestRunInitGitLab_NoCreds(t *testing.T) {
+	isolateHome(t) // full hermetic isolation for sting's own config + keyring
+
+	// GH_CONFIG_DIR is for gh library internals; isolate it too.
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
+	// Answer "n" to any auth prompt + "n" to install prompt so we never
+	// launch real device flows.
 	cmd, out, _ := newCmd()
+	cmd.SetIn(strings.NewReader("n\nn\n"))
+
 	err := runInitGitLab(cmd, nil)
 	if err != nil {
 		t.Fatalf("runInitGitLab: %v", err)
@@ -876,15 +910,21 @@ func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
 }
 
 func TestRunAuthStatus_WithStoredCredentials(t *testing.T) {
-	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+	home := isolateHome(t)
 
-	// Pre-populate some credentials via the store
-	store, _ := credentials.New()
-	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "github.com", credentials.Token{
-		Type:        credentials.TokenTypeOAuth,
-		AccessToken: "gho_test123",
-		Username:    "octocat",
-	}, false)
+	// Seed directly into the isolated hosts.yml (hermetic, no keyring involvement,
+	// matches what List() and status expect after our marker/keyring fixes).
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hostsPath := filepath.Join(stingDir, "hosts.yml")
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "gho_test123"
+    user: "octocat"
+`
+	_ = os.WriteFile(hostsPath, []byte(hosts), 0600)
+
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	cmd, out, _ := newCmd()
 	err := runAuthStatus(cmd, nil)
