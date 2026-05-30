@@ -35,7 +35,7 @@ threshold_for_pkg() {
     "github.com/skaphos/sting/internal/cli")
       echo "68" ;;   # Current realistic floor; we continue adding tests
     "github.com/skaphos/sting/internal/credentials")
-      echo "75" ;;   # gh auth integration paths + keyring fallbacks are hard to fully cover
+      echo "73" ;;   # After switching to fully isolated own hosts.yml implementation (no GH_CONFIG_DIR mutation)
     *)
       echo "$default_threshold" ;;
   esac

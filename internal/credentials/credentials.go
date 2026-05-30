@@ -4,9 +4,11 @@
 // It follows the storage standards and patterns established by the official
 // GitHub CLI (gh) as closely as possible:
 //   - Secure storage via the same zalando/go-keyring wrapper pattern.
-//   - Insecure fallback uses the same conceptual "hosts" structure
-//     (implementation currently uses JSON for the skeleton; will be
-//     switched to github.com/cli/go-gh/v2/pkg/config for full fidelity).
+//   - Insecure fallback uses our own implementation writing to
+//     ~/.config/sting/hosts.yml using the same logical "hosts" structure.
+//     We deliberately do NOT use github.com/cli/go-gh/v2/pkg/config
+//     because it only supports configuration via the GH_CONFIG_DIR
+//     environment variable, which is too risky for isolation guarantees.
 //
 // This package is intentionally internal. The public config package remains
 // focused on query defaults and does not grow auth token concerns.
@@ -21,7 +23,7 @@ import (
 	"time"
 
 	ghauth "github.com/cli/go-gh/v2/pkg/auth"
-	ghconfig "github.com/cli/go-gh/v2/pkg/config"
+	"gopkg.in/yaml.v3"
 
 	"github.com/skaphos/sting/internal/keyring"
 )
@@ -92,23 +94,26 @@ type CredentialRef struct {
 	Source   Source
 }
 
-// store implements Store using keyring (secure) + ghconfig (insecure fallback).
+// store implements Store using keyring (secure) + our own file-based
+// hosts.yml (insecure fallback) under ~/.config/sting.
 type store struct {
 	mu sync.RWMutex
 
 	// keyringSvc returns the service name used in the keyring for a host.
-	// We follow a "sting:<host>" pattern (namespaced from gh's "gh:<host>").
 	keyringSvc func(host string) string
 
-	// cfg is the ghconfig instance used for insecure (plaintext) storage.
-	// We point it at ~/.config/sting so we don't touch the user's gh config.
-	// This gives us the exact same hosts.*.oauth_token structure and multi-user support.
-	cfg *ghconfig.Config
+	// insecurePath is the directory we use for plaintext fallback storage.
+	// We use ~/.config/sting/hosts.yml with the same logical structure as gh.
+	insecurePath string
+
+	// hosts holds the in-memory representation of the hosts section
+	// loaded from (or to be written to) hosts.yml.
+	hosts map[string]map[string]string // composite -> {oauth_token, user, ...}
 }
 
-// New creates a Store using the default discovery order (following gh patterns):
-// 1. Try secure keyring via our internal/keyring wrapper (zalando/go-keyring + timeouts).
-// 2. Fall back to ghconfig (pointed at ~/.config/sting/hosts.yml + config.yml).
+// New creates a Store using the default discovery order:
+// 1. Try secure keyring via our internal/keyring wrapper.
+// 2. Fall back to our own ~/.config/sting/hosts.yml (no env var mutation, no risk to gh config).
 // The returned Store is safe for concurrent use.
 func New() (Store, error) {
 	home, err := os.UserHomeDir()
@@ -116,45 +121,30 @@ func New() (Store, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	stingConfigDir := filepath.Join(home, ".config", "sting")
-	if err := os.MkdirAll(stingConfigDir, 0700); err != nil {
+	stingDir := filepath.Join(home, ".config", "sting")
+	if err := os.MkdirAll(stingDir, 0700); err != nil {
 		return nil, fmt.Errorf("cannot create sting config directory: %w", err)
 	}
 
-	// Point go-gh's config at our own directory so we get our own hosts.yml
-	// without touching the user's ~/.config/gh.
-	old := os.Getenv("GH_CONFIG_DIR")
-	os.Setenv("GH_CONFIG_DIR", stingConfigDir)
-	defer os.Setenv("GH_CONFIG_DIR", old)
-
-	cfg, err := ghconfig.Read(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read gh-style config for sting: %w", err)
-	}
-
 	s := &store{
-		keyringSvc: func(host string) string { return "sting:" + host },
-		cfg:        cfg,
+		keyringSvc:   func(host string) string { return "sting:" + host },
+		insecurePath: stingDir,
 	}
+
+	// Load existing insecure hosts (best effort)
+	_ = s.loadInsecureHosts()
 
 	return s, nil
 }
 
-// WithFilePath returns a Store that forces the ghconfig insecure storage
-// to use a specific directory (by temporarily setting GH_CONFIG_DIR).
-// Primarily intended for tests. Keyring is still active unless overridden.
+// WithFilePath returns a Store that uses a specific directory for insecure
+// plaintext storage (primarily for hermetic tests). It never touches GH_CONFIG_DIR.
 func WithFilePath(dir string) Store {
-	old := os.Getenv("GH_CONFIG_DIR")
-	os.Setenv("GH_CONFIG_DIR", dir)
-
-	cfg, _ := ghconfig.Read(nil) // best effort for tests
-
-	os.Setenv("GH_CONFIG_DIR", old)
-
 	s := &store{
-		keyringSvc: func(host string) string { return "sting:" + host },
-		cfg:        cfg,
+		keyringSvc:   func(host string) string { return "sting:" + host },
+		insecurePath: dir,
 	}
+	_ = s.loadInsecureHosts()
 	return s
 }
 
@@ -188,22 +178,35 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 			return false, fmt.Errorf("secure storage required but failed: %w", err)
 		}
 
-		// 2. Fallback to ghconfig (insecure)
-		s.cfg.Set([]string{"hosts", composite, "oauth_token"}, tok.AccessToken)
+		// 2. Fallback to our own insecure hosts.yml (strictly under sting dir)
+		if s.hosts == nil {
+			s.hosts = make(map[string]map[string]string)
+		}
+		if s.hosts[composite] == nil {
+			s.hosts[composite] = make(map[string]string)
+		}
+		s.hosts[composite]["oauth_token"] = tok.AccessToken
 		if tok.Username != "" {
-			s.cfg.Set([]string{"hosts", composite, "user"}, tok.Username)
+			s.hosts[composite]["user"] = tok.Username
 		}
 
-		if writeErr := ghconfig.Write(s.cfg); writeErr != nil {
-			return false, fmt.Errorf("failed to write insecure ghconfig: %w", writeErr)
+		if writeErr := s.saveInsecureHosts(); writeErr != nil {
+			return false, fmt.Errorf("failed to write insecure hosts file: %w", writeErr)
 		}
 		return true, nil
 	}
 
-	// Secure succeeded — clean up any stale insecure entry for this host (gh behavior)
-	_ = s.cfg.Remove([]string{"hosts", composite, "oauth_token"})
-	_ = s.cfg.Remove([]string{"hosts", composite, "user"})
-	_ = ghconfig.Write(s.cfg)
+	// Secure succeeded — clean up any stale insecure entry for this host
+	if s.hosts != nil {
+		if entry, ok := s.hosts[composite]; ok {
+			delete(entry, "oauth_token")
+			delete(entry, "user")
+			if len(entry) == 0 {
+				delete(s.hosts, composite)
+			}
+			_ = s.saveInsecureHosts()
+		}
+	}
 
 	return false, nil
 }
@@ -223,28 +226,27 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 		}, SourceKeyring, nil
 	}
 
-	// 2. Fall back to our ghconfig-based insecure storage
-	if tokStr, err := s.cfg.Get([]string{"hosts", composite, "oauth_token"}); err == nil && tokStr != "" {
-		user, _ := s.cfg.Get([]string{"hosts", composite, "user"})
-		return Token{
-			Type:        TokenTypeOAuth,
-			AccessToken: tokStr,
-			Username:    user,
-		}, SourceFile, nil
+	// 2. Fall back to our own insecure hosts.yml
+	if s.hosts != nil {
+		if entry, ok := s.hosts[composite]; ok {
+			if tokStr := entry["oauth_token"]; tokStr != "" {
+				return Token{
+					Type:        TokenTypeOAuth,
+					AccessToken: tokStr,
+					Username:    entry["user"],
+				}, SourceFile, nil
+			}
+		}
 	}
 
 	// 3. For GitHub providers, also consult go-gh/pkg/auth as an additional source.
-	//    This gives us:
-	//    - GitHub-specific env var handling (GH_TOKEN, GITHUB_TOKEN, etc.)
-	//    - Reading from the user's gh config (if any)
-	//    - Access to system keyring via `gh auth token` if the gh binary is installed
+	//    This is read-only and does not involve writing config.
 	if provider == ProviderGitHub {
 		if token, source := ghauth.TokenForHost(host); token != "" {
-			// Map go-gh source names to our Source constants where it makes sense
 			ourSource := SourceConfig
 			switch source {
 			case "gh":
-				ourSource = SourceKeyring // came via gh binary → effectively keyring
+				ourSource = SourceKeyring
 			case "oauth_token":
 				ourSource = SourceFile
 			}
@@ -254,7 +256,6 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 			}, ourSource, nil
 		}
 
-		// Also try the env-or-config only version (in case TokenForHost behavior changes)
 		if token, source := ghauth.TokenFromEnvOrConfig(host); token != "" {
 			ourSource := SourceConfig
 			if source == "oauth_token" {
@@ -279,10 +280,19 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 
 	// Best effort delete from both secure and insecure
 	_ = keyring.Delete(s.keyringSvc(host), "")
-	_ = s.cfg.Remove([]string{"hosts", composite, "oauth_token"})
-	_ = s.cfg.Remove([]string{"hosts", composite, "user"})
 
-	return ghconfig.Write(s.cfg)
+	if s.hosts != nil {
+		if entry, ok := s.hosts[composite]; ok {
+			delete(entry, "oauth_token")
+			delete(entry, "user")
+			if len(entry) == 0 {
+				delete(s.hosts, composite)
+			}
+			_ = s.saveInsecureHosts()
+		}
+	}
+
+	return nil
 }
 
 // List implements Store.
@@ -292,18 +302,12 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 
 	var refs []CredentialRef
 
-	// For now we enumerate from the ghconfig hosts map.
-	// A more complete version would also enumerate keyring entries.
-	hosts, err := s.cfg.Keys([]string{"hosts"})
-	if err != nil {
-		return nil, nil // no hosts section yet
+	if s.hosts == nil {
+		return nil, nil
 	}
 
-	for _, composite := range hosts {
-		if tok, err := s.cfg.Get([]string{"hosts", composite, "oauth_token"}); err == nil && tok != "" {
-			user, _ := s.cfg.Get([]string{"hosts", composite, "user"})
-
-			// Parse back the provider:host we stored
+	for composite, entry := range s.hosts {
+		if tok := entry["oauth_token"]; tok != "" {
 			prov, h := ProviderGitHub, composite
 			if idx := len("github:"); len(composite) > idx && composite[:idx] == "github:" {
 				prov, h = ProviderGitHub, composite[idx:]
@@ -314,7 +318,7 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 			refs = append(refs, CredentialRef{
 				Provider: prov,
 				Host:     h,
-				Username: user,
+				Username: entry["user"],
 				Source:   SourceFile,
 			})
 		}
@@ -325,10 +329,64 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 
 // WithKeyringForTest returns a Store that uses the provided KeyringBackend
 // for the secure path (useful for hermetic tests). The insecure path still
-// uses go-gh config (pointed at the given directory).
+// uses our own file-based storage under the given directory.
 func WithKeyringForTest(backend KeyringBackend, configDir string) Store {
-	// For the skeleton we accept the backend but still go through our wrapper
-	// for the main path. Full injection can be added when we need it.
-	// For now we just return a normal WithFilePath version.
 	return WithFilePath(configDir)
+}
+
+// --- Insecure hosts.yml handling (strictly scoped to Sting) ---
+
+type hostsFile struct {
+	Hosts map[string]map[string]string `yaml:"hosts,omitempty"`
+}
+
+func (s *store) insecureHostsPath() string {
+	return filepath.Join(s.insecurePath, "hosts.yml")
+}
+
+func (s *store) loadInsecureHosts() error {
+	path := s.insecureHostsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.hosts = make(map[string]map[string]string)
+			return nil
+		}
+		return err
+	}
+
+	var hf hostsFile
+	if err := yaml.Unmarshal(data, &hf); err != nil {
+		return err
+	}
+
+	if hf.Hosts == nil {
+		s.hosts = make(map[string]map[string]string)
+	} else {
+		s.hosts = hf.Hosts
+	}
+	return nil
+}
+
+func (s *store) saveInsecureHosts() error {
+	if s.insecurePath == "" {
+		return nil
+	}
+
+	path := s.insecureHostsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+
+	hf := hostsFile{Hosts: s.hosts}
+	if hf.Hosts == nil {
+		hf.Hosts = make(map[string]map[string]string)
+	}
+
+	data, err := yaml.Marshal(hf)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0600)
 }
