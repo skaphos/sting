@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/internal/mcpinstall"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -784,6 +786,18 @@ func TestMustNoPanic(t *testing.T) {
 	must(nil) // should not panic
 }
 
+func TestRunInit(t *testing.T) {
+	cmd, out, _ := newCmd()
+	err := runInit(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Welcome to Sting") {
+		t.Errorf("expected welcome message from init, got:\n%s", output)
+	}
+}
+
 // --- GitLab auth command tests ---
 
 func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
@@ -826,6 +840,28 @@ func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
 	_ = out
 }
 
+func TestRunAuthStatus_WithStoredCredentials(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	// Pre-populate some credentials via the store
+	store, _ := credentials.New()
+	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "github.com", credentials.Token{
+		Type:        credentials.TokenTypeOAuth,
+		AccessToken: "gho_test123",
+		Username:    "octocat",
+	}, false)
+
+	cmd, out, _ := newCmd()
+	err := runAuthStatus(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "github.com") && !strings.Contains(output, "Logged in") {
+		t.Errorf("expected to see stored credential in status output, got:\n%s", output)
+	}
+}
+
 func TestRunAuthGitLab_WithToken(t *testing.T) {
 	// Isolate storage. Use --insecure-storage so the test is hermetic even
 	// when no keyring (org.freedesktop.secrets) is available in CI.
@@ -862,6 +898,47 @@ func TestRunAuthGitLab_WithToken(t *testing.T) {
 	}
 }
 
+func TestRunAuthLogout_Idempotent(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	origHost := authLogoutHostname
+	t.Cleanup(func() {
+		authLogoutHostname = origHost
+	})
+
+	authLogoutHostname = ""
+
+	cmd, out, _ := newCmd()
+
+	err := runAuthLogout(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthLogout with no credentials should be idempotent: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "No credentials") && !strings.Contains(output, "Logged out") {
+		t.Logf("logout no-op output: %s", output)
+	}
+}
+
+func TestRunAuthLogout_SpecificProvider(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	origHost := authLogoutHostname
+	t.Cleanup(func() {
+		authLogoutHostname = origHost
+	})
+
+	authLogoutHostname = ""
+
+	cmd, out, _ := newCmd()
+
+	err := runAuthLogout(cmd, []string{"github"})
+	if err != nil {
+		t.Fatalf("runAuthLogout github: %v", err)
+	}
+	_ = out
+}
+
 func TestRunAuthGitLab_WithToken_EmptyInput(t *testing.T) {
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
@@ -878,6 +955,21 @@ func TestRunAuthGitLab_WithToken_EmptyInput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no token provided on stdin") {
 		t.Errorf("expected 'no token provided' error, got: %v", err)
+	}
+}
+
+func TestRunAuthStatus_MultipleHosts(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	store, _ := credentials.New()
+	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "github.com", credentials.Token{AccessToken: "main"}, false)
+	_, _ = store.Save(context.Background(), credentials.ProviderGitHub, "ghe.example.com", credentials.Token{AccessToken: "enterprise"}, false)
+
+	cmd, out, _ := newCmd()
+	_ = runAuthStatus(cmd, nil)
+	output := out.String()
+	if !strings.Contains(output, "github.com") || !strings.Contains(output, "ghe.example.com") {
+		t.Errorf("expected multiple hosts in status output, got:\n%s", output)
 	}
 }
 
