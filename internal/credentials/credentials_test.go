@@ -534,8 +534,10 @@ func TestDeleteCleansEmptyComposite(t *testing.T) {
 type succeedingKeyring struct{}
 
 func (succeedingKeyring) Set(service, user, secret string) error { return nil }
-func (succeedingKeyring) Get(service, user string) (string, error)     { return "fake-token-from-keyring", nil }
-func (succeedingKeyring) Delete(service, user string) error            { return nil }
+func (succeedingKeyring) Get(service, user string) (string, error) {
+	return "fake-token-from-keyring", nil
+}
+func (succeedingKeyring) Delete(service, user string) error { return nil }
 
 // TestSaveKeyringSuccessCreatesMarker exercises the keyring success path in Save,
 // including creation of the token-less marker and the (ignored) saveInsecureHosts call.
