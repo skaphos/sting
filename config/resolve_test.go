@@ -128,3 +128,26 @@ func TestResolveStatsOverride(t *testing.T) {
 		t.Error("expected IncludeStats override to true")
 	}
 }
+
+func TestResolveDiffsImplyFiles(t *testing.T) {
+	cfg := Default()
+	yes := true
+	max := 1234
+	q, err := cfg.Resolve(Request{
+		Author:       "x",
+		IncludeDiffs: &yes,
+		MaxDiffBytes: &max,
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !q.IncludeDiffs {
+		t.Error("expected IncludeDiffs override to true")
+	}
+	if !q.IncludeFiles {
+		t.Error("IncludeDiffs should imply IncludeFiles")
+	}
+	if q.MaxDiffBytes != 1234 {
+		t.Errorf("MaxDiffBytes = %d, want 1234", q.MaxDiffBytes)
+	}
+}

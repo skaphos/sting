@@ -26,6 +26,9 @@ type GetCommitsInput struct {
 	Repos        []string `json:"repos,omitempty" jsonschema:"repository/project targets; required for scope=repos, and narrows GitHub scope=search to those repos (incl. private with access)"`
 	Org          string   `json:"org,omitempty" jsonschema:"organization or GitLab group; required for scope=org, and scopes GitHub scope=search into that org (reaches private repos the token can access)"`
 	IncludeStats bool     `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions; GitHub uses extra API calls, GitLab uses commit-list stats"`
+	IncludeFiles bool     `json:"include_files,omitempty" jsonschema:"fetch per-file change summaries; uses extra commit-detail API calls"`
+	IncludeDiffs bool     `json:"include_diffs,omitempty" jsonschema:"fetch bounded patch text for changed files; implies include_files and can be token-heavy"`
+	MaxDiffBytes int      `json:"max_diff_bytes,omitempty" jsonschema:"per-commit patch byte cap when include_diffs is true; defaults to server config"`
 }
 
 // handler holds the dependencies shared across tool calls.
@@ -81,6 +84,15 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 	}
 	if in.IncludeStats {
 		req.IncludeStats = &in.IncludeStats
+	}
+	if in.IncludeFiles {
+		req.IncludeFiles = &in.IncludeFiles
+	}
+	if in.IncludeDiffs {
+		req.IncludeDiffs = &in.IncludeDiffs
+	}
+	if in.MaxDiffBytes != 0 {
+		req.MaxDiffBytes = &in.MaxDiffBytes
 	}
 
 	q, err := h.cfg.Resolve(req, time.Now())

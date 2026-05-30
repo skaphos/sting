@@ -3,6 +3,12 @@ package model
 
 import "testing"
 
+func TestSchemaVersion(t *testing.T) {
+	if SchemaVersion != "sting.skaphos.io/v2" {
+		t.Errorf("SchemaVersion = %q, want sting.skaphos.io/v2", SchemaVersion)
+	}
+}
+
 func TestProviderValid(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

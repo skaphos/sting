@@ -13,7 +13,11 @@ import (
 // Result so downstream consumers (e.g. a Wake evidence adapter) can pin the
 // shape they map from and detect drift. Bump it on any breaking change to
 // Result or Commit.
-const SchemaVersion = "sting.skaphos.io/v1"
+const SchemaVersion = "sting.skaphos.io/v2"
+
+// DefaultMaxDiffBytes is the default per-commit patch-text budget used when a
+// query requests full diffs but does not set an explicit limit.
+const DefaultMaxDiffBytes = 60000
 
 // Provider identifies the source control provider a query targets.
 type Provider string
@@ -77,6 +81,14 @@ type Query struct {
 	// IncludeStats requests per-commit additions/deletions. This costs one
 	// extra API call per commit, so it is off by default.
 	IncludeStats bool
+	// IncludeFiles requests per-file change summaries. Providers usually fetch
+	// this from the same detail endpoint as stats.
+	IncludeFiles bool
+	// IncludeDiffs requests patch text for changed files. This implies
+	// IncludeFiles and is bounded by MaxDiffBytes.
+	IncludeDiffs bool
+	// MaxDiffBytes caps patch text per commit when IncludeDiffs is true.
+	MaxDiffBytes int
 	// MaxCommits caps the number of commits returned (0 = no cap).
 	MaxCommits int
 }
@@ -93,6 +105,20 @@ type Commit struct {
 	URL        string    `json:"url"`              // html_url
 	Additions  int       `json:"additions,omitempty"`
 	Deletions  int       `json:"deletions,omitempty"`
+	Changes    int       `json:"changes,omitempty"`
+	Files      []File    `json:"files,omitempty"`
+}
+
+// File is a normalized file-level change record for a commit.
+type File struct {
+	Path           string `json:"path"`
+	PreviousPath   string `json:"previous_path,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Additions      int    `json:"additions,omitempty"`
+	Deletions      int    `json:"deletions,omitempty"`
+	Changes        int    `json:"changes,omitempty"`
+	Patch          string `json:"patch,omitempty"`
+	PatchTruncated bool   `json:"patch_truncated,omitempty"`
 }
 
 // Summary is the first line of the commit message.

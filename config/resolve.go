@@ -22,6 +22,12 @@ type Request struct {
 
 	// IncludeStats overrides the default when non-nil.
 	IncludeStats *bool
+	// IncludeFiles overrides the default when non-nil.
+	IncludeFiles *bool
+	// IncludeDiffs overrides the default when non-nil.
+	IncludeDiffs *bool
+	// MaxDiffBytes overrides the default when non-nil.
+	MaxDiffBytes *int
 }
 
 // Resolve turns a Request into a validated model.Query, applying defaults from
@@ -100,6 +106,27 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 	if req.IncludeStats != nil {
 		includeStats = *req.IncludeStats
 	}
+	includeFiles := cfg.IncludeFiles
+	if req.IncludeFiles != nil {
+		includeFiles = *req.IncludeFiles
+	}
+	includeDiffs := cfg.IncludeDiffs
+	if req.IncludeDiffs != nil {
+		includeDiffs = *req.IncludeDiffs
+	}
+	if includeDiffs {
+		includeFiles = true
+	}
+	maxDiffBytes := cfg.MaxDiffBytes
+	if maxDiffBytes == 0 {
+		maxDiffBytes = model.DefaultMaxDiffBytes
+	}
+	if req.MaxDiffBytes != nil {
+		maxDiffBytes = *req.MaxDiffBytes
+	}
+	if maxDiffBytes < 0 {
+		return model.Query{}, fmt.Errorf("max_diff_bytes must be >= 0, got %d", maxDiffBytes)
+	}
 
 	return model.Query{
 		Provider:     provider,
@@ -110,6 +137,9 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		Repos:        repos,
 		Org:          org,
 		IncludeStats: includeStats,
+		IncludeFiles: includeFiles,
+		IncludeDiffs: includeDiffs,
+		MaxDiffBytes: maxDiffBytes,
 		MaxCommits:   cfg.MaxCommits,
 	}, nil
 }
