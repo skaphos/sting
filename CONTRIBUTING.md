@@ -16,8 +16,8 @@ Thanks for contributing to sting.
 - Every commit must be cryptographically signed **and** carry a DCO sign-off:
   - `git commit -S -s …`
   - Required trailer: `Signed-off-by: Your Name <you@example.com>`
-- Use Conventional Commits for what lands on `main`. `skaphos/actions/release-pr`
-  infers the next version via [`svu`](https://github.com/caarlos0/svu):
+- Use Conventional Commits for what lands on `main`. Release Please uses them
+  to infer the next version and release notes:
   - `feat:` → minor
   - `fix:` / `perf:` → patch
   - `docs:`, `test:`, `ci:`, `chore:`, `refactor:` → no bump by default
@@ -81,9 +81,10 @@ PRs should include:
 
 ## Release Process
 
-Releases are cut by `skaphos/actions` (release-PR gate) and published by
-`goreleaser` on the resulting tag (binaries, checksums, SBOM, cosign signatures,
-provenance attestations, and a Homebrew cask). Release automation requires the
-`RELEASE_BOT_APP_ID` variable and `RELEASE_BOT_PRIVATE_KEY` secret to be
-provisioned, with the app granted access to this repository and
-`skaphos/homebrew-tools`.
+Releases are cut by Release Please and published by `goreleaser` on the
+resulting tag (binaries, checksums, SBOM, cosign signatures, provenance
+attestations, and a Homebrew cask). Release Please owns the release PR,
+`CHANGELOG.md`, tag, and GitHub release notes; GoReleaser attaches artifacts to
+that release. Release automation requires the `RELEASE_BOT_APP_ID` variable and
+`RELEASE_BOT_PRIVATE_KEY` secret to be provisioned, with the app granted access
+to this repository and `skaphos/homebrew-tools`.
