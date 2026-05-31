@@ -61,7 +61,7 @@ func init() {
 	authGitLabCmd.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (only needed for confidential apps)")
 	authGitLabCmd.Flags().BoolVarP(&authGitLabClipboard, "clipboard", "c", false, "Copy the user code to the clipboard")
 	authGitLabCmd.Flags().BoolVarP(&authGitLabWeb, "web", "w", false, "Open the verification URL in your browser automatically")
-	authGitLabCmd.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to the config file instead of the system keyring")
+	authGitLabCmd.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
 }
 
 //nolint:errcheck // fmt.Fprint* calls are for human CLI output; stdout write failures are not actionable here.
@@ -232,7 +232,7 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 
 	fmt.Fprintln(cmd.OutOrStdout())
 	if usedInsecure {
-		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to config file (insecure).\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to plaintext hosts.yml (insecure).\n")
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to system keyring.\n")
 	}

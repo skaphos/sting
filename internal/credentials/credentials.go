@@ -14,7 +14,7 @@
 //     creates too much risk of accidental leakage or corruption of
 //     ~/.config/gh during development, testing, or error conditions.)
 //   - All insecure (plaintext) credential storage is written exclusively
-//     to ~/.config/sting/hosts.yml using our own minimal implementation.
+//     to Sting's own hosts.yml using our own minimal implementation.
 //
 // The design follows the same logical "hosts.<composite>" structure that gh
 // uses for familiarity, but everything under Sting's own directory.
@@ -110,7 +110,7 @@ type CredentialRef struct {
 }
 
 // store implements Store using keyring (secure) + our own file-based
-// hosts.yml (insecure fallback) under ~/.config/sting.
+// hosts.yml (insecure fallback) under Sting's config directory.
 type store struct {
 	mu sync.RWMutex
 
@@ -124,12 +124,12 @@ type store struct {
 	kr KeyringBackend
 
 	// insecurePath is the directory we use for plaintext fallback storage.
-	// We use ~/.config/sting/hosts.yml with the same logical structure as gh.
+	// We use hosts.yml with the same logical structure as gh.
 	insecurePath string
 
 	// hosts holds the in-memory representation of the hosts section
 	// loaded from (or to be written to) hosts.yml.
-	hosts map[string]map[string]string // composite -> {oauth_token, user, ...}
+	hosts map[string]map[string]string // composite -> {oauth_token, pat_token, user, ...}
 }
 
 // defaultKeyringSvc returns the keyring service name for a (provider, host).
@@ -137,8 +137,16 @@ type store struct {
 // (e.g. github.com vs gitlab.com, or multiple GHES instances) never collide.
 func defaultKeyringSvc(p Provider, h string) string { return "sting:" + compositeHost(p, h) }
 
-// defaultStingDir returns ~/.config/sting, creating it if necessary.
+// defaultStingDir returns Sting's config directory, creating it if necessary.
 func defaultStingDir() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		stingDir := filepath.Join(xdg, "sting")
+		if err := os.MkdirAll(stingDir, 0700); err != nil {
+			return "", fmt.Errorf("cannot create sting config directory: %w", err)
+		}
+		return stingDir, nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
@@ -166,7 +174,7 @@ func newStore(dir string, kr KeyringBackend) *store {
 
 // New creates a Store using the default discovery order:
 // 1. Try secure keyring via our internal/keyring wrapper.
-// 2. Fall back to our own ~/.config/sting/hosts.yml (no env var mutation, no risk to gh config).
+// 2. Fall back to our own hosts.yml (no env var mutation, no risk to gh config).
 // The returned Store is safe for concurrent use.
 func New() (Store, error) {
 	dir, err := defaultStingDir()
@@ -176,7 +184,7 @@ func New() (Store, error) {
 	return newStore(dir, defaultKeyring{}), nil
 }
 
-// NewInsecure creates a Store rooted at ~/.config/sting that never uses the
+// NewInsecure creates a Store rooted at Sting's config directory that never uses the
 // system keyring: credentials are always written to the plaintext hosts.yml.
 // This backs the `--insecure-storage` flag so it deterministically forces file
 // storage instead of merely permitting fallback.
@@ -220,6 +228,27 @@ func (defaultKeyring) Delete(service, user string) error {
 	return keyring.Delete(service, user)
 }
 
+func normalizedTokenType(tok Token) TokenType {
+	if tok.Type == TokenTypePAT {
+		return TokenTypePAT
+	}
+	return TokenTypeOAuth
+}
+
+func tokenKey(tokType TokenType) string {
+	if tokType == TokenTypePAT {
+		return "pat_token"
+	}
+	return "oauth_token"
+}
+
+func tokenKeyringUser(tokType TokenType) string {
+	if tokType == TokenTypePAT {
+		return "pat"
+	}
+	return "oauth"
+}
+
 // compositeHost returns the key we use inside the ghconfig "hosts" map.
 // Using "provider:host" keeps GitHub and GitLab (and multiple GHES instances) cleanly separated
 // while still living inside the standard hosts structure that go-gh expects.
@@ -233,12 +262,13 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 	defer s.mu.Unlock()
 
 	composite := compositeHost(provider, host)
+	tokType := normalizedTokenType(tok)
 
 	// 1. Try secure storage first (keyring). A nil backend means file-only mode,
 	//    which we treat as a keyring miss so the fallback / secureOnly logic applies.
 	err := errKeyringDisabled
 	if s.kr != nil {
-		err = s.kr.Set(s.keyringSvc(provider, host), "", tok.AccessToken)
+		err = s.kr.Set(s.keyringSvc(provider, host), tokenKeyringUser(tokType), tok.AccessToken)
 	}
 	if err != nil {
 		if secureOnly {
@@ -252,7 +282,8 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 		if s.hosts[composite] == nil {
 			s.hosts[composite] = make(map[string]string)
 		}
-		s.hosts[composite]["oauth_token"] = tok.AccessToken
+		s.hosts[composite][tokenKey(tokType)] = tok.AccessToken
+		s.hosts[composite]["token_type"] = string(tokType)
 		if tok.Username != "" {
 			s.hosts[composite]["user"] = tok.Username
 		}
@@ -275,10 +306,14 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 	}
 	// Remove any token that might have been there from a previous insecure save.
 	delete(s.hosts[composite], "oauth_token")
+	delete(s.hosts[composite], "pat_token")
+	s.hosts[composite]["token_type"] = string(tokType)
 	if tok.Username != "" {
 		s.hosts[composite]["user"] = tok.Username
 	}
-	_ = s.saveInsecureHosts()
+	if writeErr := s.saveInsecureHosts(); writeErr != nil {
+		return false, fmt.Errorf("credential saved to keyring but failed to write hosts.yml marker: %w", writeErr)
+	}
 
 	return false, nil
 }
@@ -292,6 +327,18 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 
 	// 1. Try keyring (secure) first. Skipped entirely in file-only mode (nil backend).
 	if s.kr != nil {
+		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth)); err == nil && tokStr != "" {
+			return Token{
+				Type:        TokenTypeOAuth,
+				AccessToken: tokStr,
+			}, SourceKeyring, nil
+		}
+		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypePAT)); err == nil && tokStr != "" {
+			return Token{
+				Type:        TokenTypePAT,
+				AccessToken: tokStr,
+			}, SourceKeyring, nil
+		}
 		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), ""); err == nil && tokStr != "" {
 			return Token{
 				Type:        TokenTypeOAuth,
@@ -306,6 +353,13 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 			if tokStr := entry["oauth_token"]; tokStr != "" {
 				return Token{
 					Type:        TokenTypeOAuth,
+					AccessToken: tokStr,
+					Username:    entry["user"],
+				}, SourceFile, nil
+			}
+			if tokStr := entry["pat_token"]; tokStr != "" {
+				return Token{
+					Type:        TokenTypePAT,
 					AccessToken: tokStr,
 					Username:    entry["user"],
 				}, SourceFile, nil
@@ -354,12 +408,16 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 
 	// Best effort delete from both secure and insecure (keyring skipped in file-only mode)
 	if s.kr != nil {
+		_ = s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth))
+		_ = s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypePAT))
 		_ = s.kr.Delete(s.keyringSvc(provider, host), "")
 	}
 
 	if s.hosts != nil {
 		if entry, ok := s.hosts[composite]; ok {
 			delete(entry, "oauth_token")
+			delete(entry, "pat_token")
+			delete(entry, "token_type")
 			delete(entry, "user")
 			if len(entry) == 0 {
 				delete(s.hosts, composite)
@@ -391,7 +449,7 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 		}
 
 		src := SourceFile
-		if entry["oauth_token"] == "" {
+		if entry["oauth_token"] == "" && entry["pat_token"] == "" {
 			// Marker entry with no token in the file → the real credential is in the keyring.
 			src = SourceKeyring
 		}

@@ -207,7 +207,7 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 		if tok.AccessToken != "" {
 			fmt.Fprintln(out, "\n✓ GitLab authentication successful!")
 			ensureDefaultProvider("gitlab")
-			fmt.Fprintln(out, "Note: GitHub is still the default. You can change it with `sting init github` if needed.")
+			fmt.Fprintln(out, "Note: GitLab is now the default. You can change it with `sting init github` if needed.")
 			printFinalSummary(out)
 			return offerInstall(cmd, out, in)
 		}

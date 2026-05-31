@@ -54,7 +54,7 @@ var (
 func init() {
 	authGitHubCmd.Flags().StringVar(&authGitHubHostname, "hostname", "", "GitHub hostname to authenticate with (default: github.com)")
 	authGitHubCmd.Flags().BoolVarP(&authGitHubWeb, "web", "w", false, "Open a browser to authenticate instead of using the device flow")
-	authGitHubCmd.Flags().BoolVar(&authGitHubInsecure, "insecure-storage", false, "Save the token to the config file instead of the system keyring")
+	authGitHubCmd.Flags().BoolVar(&authGitHubInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
 	authGitHubCmd.Flags().BoolVarP(&authGitHubClipboard, "clipboard", "c", false, "Copy the one-time code to the clipboard (device flow only)")
 
 	// Allow overriding the OAuth app credentials (required for GHES bring-your-own apps).
@@ -66,7 +66,7 @@ func init() {
 // credentialStoreForStorage returns a credential store honoring the
 // --insecure-storage choice: when insecure is true it returns a file-only store
 // (NewInsecure) so the token is deterministically written to the plaintext
-// config file instead of the system keyring; otherwise it returns the default
+// hosts.yml file instead of the system keyring; otherwise it returns the default
 // store (keyring preferred, automatic file fallback).
 func credentialStoreForStorage(insecure bool) (credentials.Store, error) {
 	if insecure {
@@ -203,7 +203,7 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 
 	fmt.Fprintln(cmd.OutOrStdout())
 	if usedInsecure {
-		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to config file (insecure).\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to plaintext hosts.yml (insecure).\n")
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "✓ Authentication complete. Token saved to system keyring.\n")
 	}

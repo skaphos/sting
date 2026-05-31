@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,57 @@ func TestPrecedenceOAuthOverPAT(t *testing.T) {
 	}
 	if got.AccessToken != "gho_oauth" {
 		t.Errorf("expected OAuth token to take precedence, got %s", got.AccessToken)
+	}
+}
+
+func TestSaveLoadPATPreservesTokenType(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	pat := Token{Type: TokenTypePAT, AccessToken: "glpat-token", Username: "gitlab-user"}
+	_, err := s.Save(context.Background(), ProviderGitLab, "gitlab.com", pat, false)
+	if err != nil {
+		t.Fatalf("Save PAT: %v", err)
+	}
+
+	got, src, err := s.Load(context.Background(), ProviderGitLab, "gitlab.com")
+	if err != nil {
+		t.Fatalf("Load PAT: %v", err)
+	}
+	if got.Type != TokenTypePAT || got.AccessToken != pat.AccessToken || got.Username != pat.Username || src != SourceFile {
+		t.Fatalf("got token=%+v src=%s, want PAT from file", got, src)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "hosts.yml"))
+	if err != nil {
+		t.Fatalf("read hosts.yml: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "pat_token: glpat-token") {
+		t.Fatalf("hosts.yml did not store PAT under pat_token:\n%s", content)
+	}
+	if strings.Contains(content, "oauth_token: glpat-token") {
+		t.Fatalf("hosts.yml stored PAT under oauth_token:\n%s", content)
+	}
+}
+
+func TestDefaultStingDirUsesXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := defaultStingDir()
+	if err != nil {
+		t.Fatalf("defaultStingDir: %v", err)
+	}
+	want := filepath.Join(xdg, "sting")
+	if got != want {
+		t.Fatalf("defaultStingDir=%q, want %q", got, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected XDG sting dir to exist: %v", err)
 	}
 }
 
@@ -627,5 +679,25 @@ func TestSaveKeyringSuccessCreatesMarker(t *testing.T) {
 	got, src, err := s.Load(context.Background(), ProviderGitHub, "ghe.example.com")
 	if err != nil || got.AccessToken != "fake-token-from-keyring" || src != SourceKeyring {
 		t.Errorf("Load after keyring success failed: got=%+v src=%s err=%v", got, src, err)
+	}
+}
+
+func TestSaveKeyringSuccessReturnsMarkerWriteError(t *testing.T) {
+	tmp := t.TempDir()
+	notDir := filepath.Join(tmp, "not-dir")
+	if err := os.WriteFile(notDir, []byte("not a directory"), 0600); err != nil {
+		t.Fatalf("create marker path blocker: %v", err)
+	}
+	s := WithKeyringForTest(succeedingKeyring{}, notDir)
+
+	_, err := s.Save(context.Background(), ProviderGitHub, "github.com", Token{
+		Type:        TokenTypeOAuth,
+		AccessToken: "secret",
+	}, false)
+	if err == nil {
+		t.Fatal("expected marker write error after keyring save")
+	}
+	if !strings.Contains(err.Error(), "failed to write hosts.yml marker") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

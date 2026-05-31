@@ -22,7 +22,7 @@ The goal (tracked in Linear SKA-466 and the detailed command design in SKA-467) 
 - GitHub: similar to `gh auth login` (web + device flow via the `cli/oauth` library).
 - GitLab: similar to `glab auth login --device`.
 
-The design calls for **explicit per-provider subcommands** (`sting auth github`, `sting auth gitlab`, plus `auth login <provider>` aliases) rather than a generic provider picker at the top level. `sting init` (and `init <provider>`) should provide guided onboarding.
+The design calls for **explicit per-provider subcommands** (`sting auth github`, `sting auth gitlab`) rather than a generic provider picker at the top level. `sting init` (and `init <provider>`) should provide guided onboarding.
 
 A critical requirement that emerged during discovery:
 
@@ -42,8 +42,8 @@ Support for classic Personal Access Tokens (PATs) is retained, but **strictly as
 **High-level changes:**
 
 - Add a new `auth` command group (`internal/cli`) with explicit subcommands:
-  - `sting auth github` / `sting auth login github`
-  - `sting auth gitlab` / `sting auth login gitlab`
+  - `sting auth github`
+  - `sting auth gitlab`
   - `sting auth status`
   - `sting auth logout [github|gitlab]`
 - Add `sting init` (and provider-specific variants) that can drive the new auth flows.
