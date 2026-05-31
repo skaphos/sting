@@ -4,6 +4,14 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.3](https://github.com/skaphos/sting/compare/v0.0.2...v0.0.3) (2026-05-31)
+
+
+### Features
+
+* add commit file and diff evidence ([#12](https://github.com/skaphos/sting/issues/12)) ([87a3fd1](https://github.com/skaphos/sting/commit/87a3fd18340ffd034cad0092c3dd33d1e2c19142))
+* add OAuth App authentication for GitHub and GitLab (SKA-466) ([#13](https://github.com/skaphos/sting/issues/13)) ([dd37ea4](https://github.com/skaphos/sting/commit/dd37ea4d0d3f11026c2fa841d85043fa933863e4))
+
 ## [0.0.2](https://github.com/skaphos/sting/compare/v0.0.1...v0.0.2) (2026-05-30)
 
 
