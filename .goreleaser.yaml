@@ -54,11 +54,41 @@ signs:
       - --yes
 
 changelog:
-  disable: true
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^chore\\("
+      - "^build:"
+      - "^refactor:"
+      - "^style:"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: Reverts
+      regexp: '^.*?revert(\(.+\))??!?:.+$'
+      order: 3
+    - title: Others
+      order: 999
 
 release:
   draft: false
   make_latest: true
+  header: |
+    ## Changelog
+  footer: |
+    See [CHANGELOG.md](https://github.com/skaphos/sting/blob/{{ .Tag }}/CHANGELOG.md) for the full release notes.
 
 homebrew_casks:
   - repository:
