@@ -62,3 +62,21 @@ func TestNewWrapsProviderBuildErrors(t *testing.T) {
 		t.Fatal("New(gitlab bad URL): want error")
 	}
 }
+
+func TestResolveGitHubTokenPrefersConfigToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.Token = "explicit-gh-token"
+
+	if got := resolveGitHubToken(cfg); got != cfg.Token {
+		t.Fatalf("resolveGitHubToken=%q, want %q", got, cfg.Token)
+	}
+}
+
+func TestResolveGitLabTokenPrefersConfigToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.GitLabToken = "explicit-gl-token"
+
+	if got := resolveGitLabToken(cfg); got != cfg.GitLabToken {
+		t.Fatalf("resolveGitLabToken=%q, want %q", got, cfg.GitLabToken)
+	}
+}

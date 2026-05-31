@@ -5,9 +5,10 @@ LLM agent (or a terminal) in a consumable form.
 
 `sting` is a single binary with subcommands:
 
+- **`sting init`** — guided first-time setup (strongly recommended).
+- **`sting auth`** — authenticate with GitHub or GitLab via OAuth (`auth github`, `auth gitlab`, `auth status`, `auth logout`).
 - **`sting mcp`** — runs an MCP server over stdio exposing a single, read-only
-  `get_commits` tool, so an agent like Claude Code can answer *"give me all the
-  commits of `mfacenet` in the last week and tell me what he's working on."*
+  `get_commits` tool.
 - **`sting <query flags>`** — prints a Markdown or JSON report locally.
 - **`sting install` / `uninstall` / `install list`** — register the MCP server
   with your agent runtimes (Claude Code, Codex, OpenCode, Grok).
@@ -35,46 +36,77 @@ Or build from this repo:
 go -C tools tool task build      # -> ./bin/sting
 ```
 
-## Authentication
-
-### GitHub
-
-sting uses its **own** token key, deliberately separate from `GITHUB_TOKEN` so a
-dedicated read-only GitHub PAT does not collide with other tools. Set it in the
-config file (`token:`) or via `STING_TOKEN`:
+## Getting started
 
 ```sh
-# config file (recommended): ~/.config/sting/config.yaml
-token: ghp_xxx
-
-# or environment
-export STING_TOKEN=ghp_xxx
+sting init          # guided setup (recommended)
+sting auth github   # or sting auth gitlab
+sting query --author yourhandle --window 7d
 ```
 
-Unauthenticated calls work for public data but are heavily rate limited (global
-commit search is ~10 requests/min without a token). A classic PAT needs no scopes
-for public repos; add read `repo` access to include private repos.
+## Authentication (recommended)
 
-### GitLab
+The modern way to authenticate is with OAuth using `sting init` and the `sting auth` commands.
 
-GitLab uses a separate token key, deliberately separate from both the GitHub
-token and ambient GitLab environment variables. Set it in the config file
-(`gitlab_token:`) or via `STING_GITLAB_TOKEN`:
+### First-time setup
 
 ```sh
-# config file (recommended): ~/.config/sting/config.yaml
+sting init
+```
+
+This is a guided wizard that:
+- Defaults to GitHub (the primary/recommended provider)
+- Can launch the OAuth flow for you
+- Sets your default provider in `~/.config/sting/config.yaml`
+
+You can also be explicit:
+
+```sh
+sting init github     # GitHub (default)
+sting init gitlab     # GitLab
+```
+
+### Manual authentication
+
+```sh
+# GitHub (uses the public Skaphos OAuth app on github.com)
+sting auth github
+sting auth github --hostname ghe.example.com   # GHES / bring-your-own app
+
+# GitLab (device flow, same as `glab`)
+sting auth gitlab
+sting auth gitlab --hostname gitlab.example.com --client-id <YOUR_ID>
+```
+
+After authenticating you can check status or log out:
+
+```sh
+sting auth status
+sting auth logout github
+sting auth logout gitlab --hostname gitlab.example.com
+```
+
+### Legacy PAT fallback
+
+Personal Access Tokens are still fully supported as a fallback (especially useful
+in CI or air-gapped environments):
+
+```sh
+# config file
+token: ghp_xxx
 gitlab_token: glpat_xxx
 
 # or environment
+export STING_TOKEN=ghp_xxx
 export STING_GITLAB_TOKEN=glpat_xxx
 ```
 
-GitLab.com is the default. For self-managed GitLab, point `gitlab_base_url` (or
-`STING_GITLAB_BASE_URL`) at the API v4 root, for example:
+See [docs/oauth-app-registration.md](docs/oauth-app-registration.md) for how to
+create the required OAuth applications and for important notes about trust,
+governance, and when organizations should register their own apps instead of
+using the public Skaphos ones.
 
-```yaml
-gitlab_base_url: https://gitlab.example.com/api/v4/
-```
+`sting auth --help` also contains the current recommended patterns.
 
 ## Agent integration (the main use case)
 
@@ -243,9 +275,9 @@ go doc ./gitlabclient Client
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — notable changes.
-- [Architecture Decision Records](docs/adr/) — why the tool is shaped the way it
-  is (single-binary MCP+CLI, dedicated PAT, multi-runtime installer, release
-  ownership).
+- [OAuth App Registration Guide](docs/oauth-app-registration.md) — how to create
+  the OAuth apps (public Skaphos apps + bring-your-own for enterprise/self-hosted).
+- [Architecture Decision Records](docs/adr/) — design decisions.
 - Per-package godoc — see the `go doc` commands above.
 
 ## Layout

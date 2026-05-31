@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -626,6 +628,69 @@ func seedValidConfig(t *testing.T) {
 	v = nv
 }
 
+func TestAuthStatusOutput_NoCredentials(t *testing.T) {
+	isolateHome(t) // hermetic: don't read/write the developer's real ~/.config/sting
+	cmd, out, _ := newCmd()
+
+	// Force a clean credential store for this test
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	err := runAuthStatus(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthStatus returned error: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Authentication status") {
+		t.Errorf("expected status header in output, got:\n%s", output)
+	}
+}
+
+func TestAuthStatusOutput_VariousStates(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(*testing.T)
+		wantSubstr []string
+	}{
+		{
+			name: "legacy github only",
+			setup: func(t *testing.T) {
+				t.Setenv("GH_CONFIG_DIR", t.TempDir())
+				// Simulate legacy token via viper (the global v in root.go)
+				v.Set("token", "legacy-gh-pat")
+			},
+			wantSubstr: []string{"Legacy token available via STING_TOKEN"},
+		},
+		{
+			name: "legacy gitlab only",
+			setup: func(t *testing.T) {
+				t.Setenv("GH_CONFIG_DIR", t.TempDir())
+				v.Set("gitlab_token", "legacy-gl-pat")
+			},
+			wantSubstr: []string{"Legacy token available via STING_GITLAB_TOKEN"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, out, _ := newCmd()
+			tc.setup(t)
+			defer func() {
+				v.Set("token", "")
+				v.Set("gitlab_token", "")
+			}()
+
+			_ = runAuthStatus(cmd, nil)
+			output := out.String()
+			for _, want := range tc.wantSubstr {
+				if !strings.Contains(output, want) {
+					t.Errorf("output missing %q:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
 func TestRunQueryNoAuthorShowsHelp(t *testing.T) {
 	cmd, out, _ := newCmd()
 	cmd.Short = "test command"
@@ -718,4 +783,333 @@ func TestMustPanics(t *testing.T) {
 
 func TestMustNoPanic(t *testing.T) {
 	must(nil) // should not panic
+}
+
+func TestRunInit(t *testing.T) {
+	isolateHome(t) // hermetic: no real HOME, no real keyring/config
+
+	// Provide answers to any prompts (auth? no; install? no) so we never
+	// attempt real OAuth flows or touch external state.
+	cmd, out, _ := newCmd()
+	cmd.SetIn(strings.NewReader("n\nn\n"))
+
+	err := runInit(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "Welcome to Sting") {
+		t.Errorf("expected welcome message from init, got:\n%s", output)
+	}
+}
+
+func TestRunInit_AlreadyHasGitHub(t *testing.T) {
+	home := isolateHome(t) // hermetic
+
+	// Seed a GitHub credential directly into the isolated sting hosts.yml
+	// so the "already authenticated" branch is taken deterministically
+	// without any prompts or network.
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hostsPath := filepath.Join(stingDir, "hosts.yml")
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "gho_seeded123"
+    user: "octocat"
+`
+	_ = os.WriteFile(hostsPath, []byte(hosts), 0600)
+
+	cmd, out, _ := newCmd()
+	// Answer "n" to the (optional) install prompt that offerInstall may ask
+	// even on the "already has creds" path.
+	cmd.SetIn(strings.NewReader("n\n"))
+
+	err := runInit(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	if !strings.Contains(out.String(), "Welcome to Sting") {
+		t.Errorf("expected welcome message")
+	}
+	if !strings.Contains(out.String(), "GitHub credentials found") {
+		t.Errorf("expected 'already has GitHub' path, got:\n%s", out.String())
+	}
+}
+
+func TestInitSubcommandsExist(t *testing.T) {
+	// init.go's init() already registers these subcommands; re-adding them here
+	// would mutate global command state and risk duplicate registration under
+	// -shuffle. Just verify the expected structure.
+	if initGitHubCmd.Use != "github" || initGitLabCmd.Use != "gitlab" {
+		t.Error("expected github and gitlab subcommands under init")
+	}
+}
+
+func TestRunInitGitLab_NoCreds(t *testing.T) {
+	isolateHome(t) // full hermetic isolation for sting's own config + keyring
+
+	// GH_CONFIG_DIR is for gh library internals; isolate it too.
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	// Answer "n" to any auth prompt + "n" to install prompt so we never
+	// launch real device flows.
+	cmd, out, _ := newCmd()
+	cmd.SetIn(strings.NewReader("n\nn\n"))
+
+	err := runInitGitLab(cmd, nil)
+	if err != nil {
+		t.Fatalf("runInitGitLab: %v", err)
+	}
+	if !strings.Contains(out.String(), "Welcome to Sting") {
+		t.Errorf("expected init output for gitlab path")
+	}
+}
+
+// --- GitLab auth command tests ---
+
+func TestRunAuthGitLab_SelfHostedRequiresOwnApp(t *testing.T) {
+	// Ensure clean globals for this test
+	origID := authGitLabClientID
+	origHost := authGitLabHostname
+	origWithToken := authGitLabWithToken
+	t.Cleanup(func() {
+		authGitLabClientID = origID
+		authGitLabHostname = origHost
+		authGitLabWithToken = origWithToken
+	})
+
+	authGitLabClientID = ""
+	authGitLabHostname = "gitlab.example.com"
+	authGitLabWithToken = false
+
+	cmd, out, _ := newCmd()
+
+	err := runAuthGitLab(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when using default creds on self-hosted GitLab")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "Self-hosted GitLab detected") {
+		t.Errorf("error should mention self-hosted detection, got: %v", err)
+	}
+	if !strings.Contains(msg, "gitlab.example.com") {
+		t.Errorf("error should mention the hostname, got: %v", err)
+	}
+	if !strings.Contains(msg, "register an OAuth Application") {
+		t.Errorf("error should instruct user to register their own app, got: %v", err)
+	}
+	if !strings.Contains(msg, "Device authorization grant flow") {
+		t.Errorf("error should mention enabling device flow, got: %v", err)
+	}
+
+	// Output should be empty for error path (message is in the returned error)
+	_ = out
+}
+
+func TestRunAuthStatus_WithStoredCredentials(t *testing.T) {
+	home := isolateHome(t)
+
+	// Seed directly into the isolated hosts.yml (hermetic, no keyring involvement,
+	// matches what List() and status expect after our marker/keyring fixes).
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hostsPath := filepath.Join(stingDir, "hosts.yml")
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "gho_test123"
+    user: "octocat"
+`
+	_ = os.WriteFile(hostsPath, []byte(hosts), 0600)
+
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	cmd, out, _ := newCmd()
+	err := runAuthStatus(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "github.com") && !strings.Contains(output, "Logged in") {
+		t.Errorf("expected to see stored credential in status output, got:\n%s", output)
+	}
+}
+
+func TestRunAuthGitLab_WithToken(t *testing.T) {
+	// Isolate storage. Use --insecure-storage so the token is deterministically
+	// written to the file backend (via NewInsecure) regardless of whether a real
+	// keyring is available on the host (e.g. macOS/Windows CI).
+	isolateHome(t)
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	origWithToken := authGitLabWithToken
+	origInsecure := authGitLabInsecure
+	t.Cleanup(func() {
+		authGitLabWithToken = origWithToken
+		authGitLabInsecure = origInsecure
+	})
+
+	authGitLabWithToken = true
+	authGitLabInsecure = true
+	authGitLabHostname = "" // defaults to gitlab.com inside func
+
+	cmd, out, _ := newCmd()
+	cmd.SetIn(strings.NewReader("glpat-test-token-123\n"))
+
+	err := runAuthGitLab(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthGitLab --with-token failed: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "GitLab token stored (insecure fallback)") {
+		t.Errorf("expected insecure storage message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Host: gitlab.com") {
+		t.Errorf("expected host in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "sting auth status") {
+		t.Errorf("expected status hint in output, got:\n%s", output)
+	}
+}
+
+func TestRunAuthLogout_Idempotent(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	origHost := authLogoutHostname
+	t.Cleanup(func() {
+		authLogoutHostname = origHost
+	})
+
+	authLogoutHostname = ""
+
+	cmd, out, _ := newCmd()
+
+	err := runAuthLogout(cmd, nil)
+	if err != nil {
+		t.Fatalf("runAuthLogout with no credentials should be idempotent: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "No credentials") && !strings.Contains(output, "Logged out") {
+		t.Logf("logout no-op output: %s", output)
+	}
+}
+
+func TestRunAuthLogout_SpecificProvider(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	origHost := authLogoutHostname
+	t.Cleanup(func() {
+		authLogoutHostname = origHost
+	})
+
+	authLogoutHostname = ""
+
+	cmd, out, _ := newCmd()
+
+	err := runAuthLogout(cmd, []string{"github"})
+	if err != nil {
+		t.Fatalf("runAuthLogout github: %v", err)
+	}
+	_ = out
+}
+
+func TestRunAuthGitLab_WithToken_EmptyInput(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	orig := authGitLabWithToken
+	t.Cleanup(func() { authGitLabWithToken = orig })
+	authGitLabWithToken = true
+
+	cmd, _, _ := newCmd()
+	cmd.SetIn(strings.NewReader("\n\n")) // only whitespace
+
+	err := runAuthGitLab(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for empty token on stdin")
+	}
+	if !strings.Contains(err.Error(), "no token provided on stdin") {
+		t.Errorf("expected 'no token provided' error, got: %v", err)
+	}
+}
+
+func TestRunAuthStatus_MultipleHosts(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+
+	// Seed the isolated hosts.yml directly so the test is fully hermetic and
+	// never touches the system keyring (which is global, not HOME-scoped) — this
+	// matches what List()/status read after the keyring-isolation fixes.
+	stingDir := filepath.Join(home, ".config", "sting")
+	_ = os.MkdirAll(stingDir, 0700)
+	hosts := `hosts:
+  "github:github.com":
+    oauth_token: "main"
+  "github:ghe.example.com":
+    oauth_token: "enterprise"
+`
+	_ = os.WriteFile(filepath.Join(stingDir, "hosts.yml"), []byte(hosts), 0600)
+
+	cmd, out, _ := newCmd()
+	_ = runAuthStatus(cmd, nil)
+	output := out.String()
+	if !strings.Contains(output, "github.com") || !strings.Contains(output, "ghe.example.com") {
+		t.Errorf("expected multiple hosts in status output, got:\n%s", output)
+	}
+}
+
+func TestFetchGitLabUsername(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+	}{
+		{
+			name: "happy path",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer testtok" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"username": "alice"})
+			},
+			want: "alice",
+		},
+		{
+			name: "non-200",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			want: "",
+		},
+		{
+			name: "bad json",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`not json`))
+			},
+			want: "",
+		},
+		{
+			name: "missing username field",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"id": "123"})
+			},
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(tc.handler)
+			defer ts.Close()
+
+			got := fetchGitLabUsername(ts.URL, "testtok")
+			if got != tc.want {
+				t.Errorf("fetchGitLabUsername() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
