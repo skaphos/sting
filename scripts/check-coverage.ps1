@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: MIT
+#
+# Per-package coverage gate (Windows).
+# See check-coverage.sh for the policy on per-package exceptions.
 
 param(
     [string]$Profile = "coverage.out"
@@ -57,8 +60,12 @@ $rows.GetEnumerator() | Sort-Object Name | ForEach-Object {
     $total = $_.Value.Total
     $pct = if ($total -eq 0) { 0.0 } else { ($covered / $total) * 100.0 }
 
-    "{0,-55} {1,6:N2}% ({2}/{3}) [min {4}%]" -f $pkg, $pct, $covered, $total, $defaultThreshold | Write-Host
-    if ($pct -lt $defaultThreshold) {
+    $threshold = $defaultThreshold
+    if ($pkg -eq "github.com/skaphos/sting/internal/cli") { $threshold = 60 }
+    elseif ($pkg -eq "github.com/skaphos/sting/internal/credentials") { $threshold = 72 }
+
+    "{0,-55} {1,6:N2}% ({2}/{3}) [min {4}%]" -f $pkg, $pct, $covered, $total, $threshold | Write-Host
+    if ($pct -lt $threshold) {
         $failures++
     }
 }

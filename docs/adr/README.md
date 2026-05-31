@@ -10,3 +10,4 @@ Supersede an accepted record with a new one rather than rewriting it.
 - [0005 — Release Please owns release notes](0005-release-please-owns-release-notes.md)
 - [0006 — GitLab provider support](0006-gitlab-provider-support.md)
 - [0007 — Commit file and diff evidence](0007-commit-file-and-diff-evidence.md)
+- [0008 — OAuth App authentication and multi-provider credential storage](0008-oauth-app-authentication.md) (Proposed)

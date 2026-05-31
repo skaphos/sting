@@ -61,7 +61,7 @@ func init() {
 
 	registerQueryFlags(rootCmd)
 
-	rootCmd.AddCommand(mcpCmd, installCmd, uninstallCmd, versionCmd)
+	rootCmd.AddCommand(mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config
