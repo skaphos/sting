@@ -48,32 +48,36 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 	}
 }
 
-// resolveGitHubToken prefers the new credentials store (for OAuth tokens),
-// falling back to the legacy config/env token for backward compatibility.
+// resolveGitHubToken lets explicit resolved config values win, then falls back
+// to the new credentials store for OAuth/PATs saved by auth commands.
 func resolveGitHubToken(cfg config.Config) string {
-	// Try the modern credential store first (supports OAuth + PATs stored via `auth` commands)
+	if cfg.Token != "" {
+		return cfg.Token
+	}
+
 	if store, err := credentials.New(); err == nil {
 		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitHub, githubHost(cfg)); err == nil && tok.AccessToken != "" {
 			return tok.AccessToken
 		}
 	}
 
-	// Legacy fallback (STING_TOKEN, config token, etc.)
-	return cfg.Token
+	return ""
 }
 
-// resolveGitLabToken prefers the new credentials store (OAuth tokens or PATs
-// stored via `sting auth gitlab`), falling back to the legacy gitlab_token
-// (config or STING_GITLAB_TOKEN) for backward compatibility.
+// resolveGitLabToken lets explicit resolved config values win, then falls back
+// to the new credentials store for OAuth/PATs saved by auth commands.
 func resolveGitLabToken(cfg config.Config) string {
+	if cfg.GitLabToken != "" {
+		return cfg.GitLabToken
+	}
+
 	if store, err := credentials.New(); err == nil {
 		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitLab, gitlabHost(cfg)); err == nil && tok.AccessToken != "" {
 			return tok.AccessToken
 		}
 	}
 
-	// Legacy fallback
-	return cfg.GitLabToken
+	return ""
 }
 
 // githubHost returns the hostname to use when looking up GitHub credentials.

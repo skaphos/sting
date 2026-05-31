@@ -649,12 +649,12 @@ func TestAuthStatusOutput_NoCredentials(t *testing.T) {
 func TestAuthStatusOutput_VariousStates(t *testing.T) {
 	cases := []struct {
 		name       string
-		setup      func()
+		setup      func(*testing.T)
 		wantSubstr []string
 	}{
 		{
 			name: "legacy github only",
-			setup: func() {
+			setup: func(t *testing.T) {
 				t.Setenv("GH_CONFIG_DIR", t.TempDir())
 				// Simulate legacy token via viper (the global v in root.go)
 				v.Set("token", "legacy-gh-pat")
@@ -663,7 +663,7 @@ func TestAuthStatusOutput_VariousStates(t *testing.T) {
 		},
 		{
 			name: "legacy gitlab only",
-			setup: func() {
+			setup: func(t *testing.T) {
 				t.Setenv("GH_CONFIG_DIR", t.TempDir())
 				v.Set("gitlab_token", "legacy-gl-pat")
 			},
@@ -674,7 +674,7 @@ func TestAuthStatusOutput_VariousStates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, out, _ := newCmd()
-			tc.setup()
+			tc.setup(t)
 			defer func() {
 				v.Set("token", "")
 				v.Set("gitlab_token", "")

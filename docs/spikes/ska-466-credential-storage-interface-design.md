@@ -143,11 +143,12 @@ All questions have been reviewed and confirmed. These are now final for implemen
 
 ### 1. File format for plaintext fallback — **LOCKED**
 
-**Final Decision:** Use **`github.com/cli/go-gh/v2/pkg/config`** (the exact library and format gh uses) for all insecure/plaintext credential storage.
+**Final Decision:** Use Sting's own `hosts.yml` under Sting's config directory, written through `internal/credentials` with a minimal YAML schema.
 
-- Insecure fallback will live in Sting's config directory using the `hosts.<hostname>.oauth_token` structure (and multi-user variant).
-- Same `0600` permissions and split `config.yml` / `hosts.yml` behavior as gh.
-- Confirmed via direct inspection of `go-gh/pkg/config/config.go`.
+- Insecure fallback lives in Sting's config directory, never under the user's `gh` config directory.
+- The file uses `hosts.<provider>:<hostname>.oauth_token` and `hosts.<provider>:<hostname>.pat_token` entries so OAuth and PAT credentials remain distinguishable.
+- The writer uses `0600` permissions and an atomic temp-file-plus-rename write.
+- `github.com/cli/go-gh/v2/pkg/config` remains read-only compatibility context for GitHub credential discovery; it is not used for writing Sting credentials.
 
 ### 2. Keyring library choice — **LOCKED**
 
@@ -187,11 +188,11 @@ Supported use case (especially important for GHES).
 
 **All open design questions have now been addressed above with proposed resolutions.**
 
-The "Recommended Approach" (follow gh's zalando/go-keyring + go-gh/pkg/config exactly) remains the guiding principle for implementation.
+The implementation follows gh's keyring choice while keeping plaintext writes isolated to Sting's own config directory.
 
 Next step after review: Lock these decisions, update ADR 0007 with any final implications, then begin the first implementation slice (adding the dependencies + the keyring wrapper + a working `credentials.Store` implementation).
 
-This is the "use the libs and standards" path.
+This keeps the useful library precedent without mutating the user's GitHub CLI configuration.
 
 Do **not** reach for `99designs/keyring` — stick to zalando to match gh exactly.
 
@@ -214,7 +215,7 @@ As we continue implementation, we are deliberately maximizing reuse of `github.c
 
 ### Current Usage
 
-- **`pkg/config`** — Fully wired for insecure (plaintext) credential storage. We use the standard `hosts.<composite>.oauth_token` structure and benefit from its file handling, multi-user support, and `Write()` semantics. This replaced our earlier ad-hoc JSON approach.
+- **`pkg/config`** — Kept as reference material only. Sting does not write through go-gh config because that would require routing through GitHub CLI configuration state. Plaintext credential writes are handled by `internal/credentials` in Sting's own `hosts.yml`.
 
 ### In Progress / Next
 

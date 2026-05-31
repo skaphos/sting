@@ -86,7 +86,7 @@ Sting will support configuring custom client credentials (via config file or env
 - Organizations with strict audit or branding requirements
 - Fine-grained scope control
 
-Until the configuration support lands, you can still use `--with-token` to supply a PAT as the fallback.
+Until the configuration support lands, GitHub PAT fallback remains available through `STING_TOKEN`, `token:` in `config.yaml`, or `--token` on commands that accept it.
 
 ## GitLab (gitlab.com and self-hosted)
 

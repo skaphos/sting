@@ -10,6 +10,7 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/cli/oauth"
+	oauthapi "github.com/cli/oauth/api"
 	"github.com/skaphos/sting/internal/credentials"
 	"github.com/spf13/cobra"
 )
@@ -162,7 +163,12 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 
 	fmt.Fprintln(cmd.OutOrStdout(), "Authenticating with GitHub...")
 
-	token, err := flow.DetectFlow()
+	var token *oauthapi.AccessToken
+	if authGitHubWeb {
+		token, err = flow.WebAppFlow()
+	} else {
+		token, err = flow.DetectFlow()
+	}
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
