@@ -16,6 +16,20 @@ import (
 // stalled connection cannot hang the command indefinitely.
 const queryTimeout = 2 * time.Minute
 
+// queryCmd implements the explicit `sting query` subcommand. It reuses the
+// same runQuery and flag set as the root command's direct-invocation style
+// (e.g. `sting --author foo`), so both forms work and the README example
+// `sting query --author ...` is satisfied.
+var queryCmd = &cobra.Command{
+	Use:   "query",
+	Short: "Query a GitHub or GitLab user's commits over a time window",
+	Long: "Prints a Markdown or JSON commit report.\n\n" +
+		"This is the primary CLI surface for ad-hoc queries; the identical " +
+		"engine powers the MCP get_commits tool. All query flags are also " +
+		"accepted directly on the root command for brevity.",
+	RunE: runQuery,
+}
+
 // registerQueryFlags attaches the per-query flags to cmd. They are local flags
 // (not bound to viper) because they are request inputs that override the
 // resolved config defaults for a single invocation.
