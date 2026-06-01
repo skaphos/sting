@@ -4,6 +4,19 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4](https://github.com/skaphos/sting/compare/v0.0.3...v0.0.4) (2026-06-01)
+
+
+### Features
+
+* add commit file and diff evidence ([#12](https://github.com/skaphos/sting/issues/12)) ([1c8369b](https://github.com/skaphos/sting/commit/1c8369b4dda6d6cd05792e23050fc2a94b1d5639))
+* add commit-query core ([1674079](https://github.com/skaphos/sting/commit/16740799d7bc457135a660ca9b63a9831757438a))
+* add GitLab commit provider ([#6](https://github.com/skaphos/sting/issues/6)) ([8e9823a](https://github.com/skaphos/sting/commit/8e9823a568ccb5f07f6881bbf5509d8691a41ac4))
+* add MCP server with read-only get_commits tool ([37c3616](https://github.com/skaphos/sting/commit/37c361625c7cc892468aed683a981511f326edff))
+* add multi-runtime MCP installer ([48d09bf](https://github.com/skaphos/sting/commit/48d09bfb45fa8fe678f93a79329335b324a29ff7))
+* add OAuth App authentication for GitHub and GitLab (SKA-466) ([#13](https://github.com/skaphos/sting/issues/13)) ([7d39af3](https://github.com/skaphos/sting/commit/7d39af385f8937178319c668bf970c222dec9238))
+* wire cobra CLI with viper config and the sting binary ([14e4f8b](https://github.com/skaphos/sting/commit/14e4f8b6e2eacc7565c1497a245ad93ecfcde2a8))
+
 ## [0.0.3](https://github.com/skaphos/sting/compare/v0.0.2...v0.0.3) (2026-05-31)
 
 
