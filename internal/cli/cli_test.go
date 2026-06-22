@@ -703,6 +703,45 @@ func TestRunQueryNoAuthorShowsHelp(t *testing.T) {
 	}
 }
 
+// TestQuerySubcommandWiredWithFlags guards the `sting query` subcommand: it must
+// stay reachable from the root command and expose the full query flag surface,
+// so the subcommand or any of its flags cannot be silently removed or renamed.
+func TestQuerySubcommandWiredWithFlags(t *testing.T) {
+	// queryCmd is wired into rootCmd (and its flags registered) by init().
+	sub, _, err := rootCmd.Find([]string{"query"})
+	if err != nil {
+		t.Fatalf("rootCmd.Find([query]): %v", err)
+	}
+	if sub != queryCmd {
+		t.Fatalf("`query` resolved to %q, want the query subcommand", sub.Name())
+	}
+
+	wantFlags := []string{
+		"provider", "author", "since", "until", "window", "scope",
+		"repos", "org", "format", "stats", "files", "diffs", "max-diff-bytes", "prs",
+	}
+	for _, name := range wantFlags {
+		if sub.Flags().Lookup(name) == nil {
+			t.Errorf("query subcommand missing --%s flag", name)
+		}
+	}
+
+	// Help output renders the flag surface, so `sting query --help` shows the
+	// documented flags to a user or agent.
+	var out bytes.Buffer
+	queryCmd.SetOut(&out)
+	t.Cleanup(func() { queryCmd.SetOut(nil) })
+	if err := queryCmd.Help(); err != nil {
+		t.Fatalf("query help: %v", err)
+	}
+	help := out.String()
+	for _, want := range []string{"--author", "--scope", "--format"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("query help missing %q; got:\n%s", want, help)
+		}
+	}
+}
+
 func TestRunQueryInvalidFormat(t *testing.T) {
 	seedValidConfig(t)
 	cmd, _, _ := newCmd()

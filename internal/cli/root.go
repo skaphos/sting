@@ -31,7 +31,8 @@ var rootCmd = &cobra.Command{
 	Use:   "sting",
 	Short: "Query a GitHub or GitLab user's commits over a time window",
 	Long: "sting reports a GitHub or GitLab user's commits over a time window for an LLM agent or a terminal.\n\n" +
-		"Run with query flags to print a report, `sting mcp` to serve the read-only get_commits tool over stdio, " +
+		"Run `sting query` (or supply query flags directly) to print a report, " +
+		"`sting mcp` to serve the read-only get_commits tool over stdio, " +
 		"or `sting install` to register that server with your agent runtimes.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -60,8 +61,11 @@ func init() {
 	must(v.BindPFlag("max_commits", pf.Lookup("max-commits")))
 
 	registerQueryFlags(rootCmd)
+	// Also register on the query subcommand so `sting query --author ...` works
+	// with the exact same flag surface (and satisfies documented usage).
+	registerQueryFlags(queryCmd)
 
-	rootCmd.AddCommand(mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
+	rootCmd.AddCommand(queryCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config
