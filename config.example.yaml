@@ -39,3 +39,4 @@ include_stats: false         # fetch per-commit additions/deletions
 include_files: false         # fetch per-file change summaries
 include_diffs: false         # fetch bounded patch text; implies include_files
 max_diff_bytes: 60000        # per-commit patch byte cap when diffs are enabled
+include_prs: false           # discover open-PR branch commits (GitHub, scope=repos/org)

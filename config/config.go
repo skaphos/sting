@@ -57,6 +57,9 @@ type Config struct {
 	IncludeDiffs bool `mapstructure:"include_diffs"`
 	// MaxDiffBytes caps patch text per commit when diffs are requested.
 	MaxDiffBytes int `mapstructure:"max_diff_bytes"`
+	// IncludePullRequests augments repos/org discovery with open-PR branch
+	// commits by default (GitHub only).
+	IncludePullRequests bool `mapstructure:"include_prs"`
 }
 
 // Defaults are the built-in configuration values, keyed by their canonical
@@ -80,6 +83,7 @@ func Defaults() map[string]any {
 		"include_files":   false,
 		"include_diffs":   false,
 		"max_diff_bytes":  model.DefaultMaxDiffBytes,
+		"include_prs":     false,
 	}
 }
 

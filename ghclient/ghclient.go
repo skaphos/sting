@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -162,7 +163,7 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 		if !ok {
 			return nil, fmt.Errorf("invalid repo %q (want owner/repo)", target)
 		}
-		commits, err := c.listRepoCommits(ctx, owner, repo, q)
+		commits, err := c.collectRepo(ctx, owner, repo, q)
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +190,7 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 		if !ok {
 			continue
 		}
-		commits, err := c.listRepoCommits(ctx, owner, repo, q)
+		commits, err := c.collectRepo(ctx, owner, repo, q)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +202,44 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 	return out, nil
 }
 
-func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q model.Query) ([]model.Commit, error) {
+// collectRepo gathers a repo's default-branch commits and, when the query opts
+// into pull-request discovery, the author-matching commits on open PR branches
+// that are not yet reachable from the default branch. The seen set dedups SHAs
+// within this one repository — across the default-branch listing and every open
+// PR (a commit can appear in multiple PRs and may already be on the default
+// branch). It is intentionally per-repo: a SHA is only unique within a repo, so
+// deduping across repos (e.g. forks with shared history) would drop legitimate
+// evidence.
+func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Query) ([]model.Commit, error) {
+	seen := map[string]bool{}
+	commits, err := c.listRepoCommits(ctx, owner, repo, q, seen)
+	if err != nil {
+		return nil, err
+	}
+	if q.IncludePullRequests {
+		// Keep PR discovery within the per-repo cap: the default-branch listing
+		// may have already filled it, in which case skip PR enumeration entirely
+		// (no wasted API calls), otherwise only fetch the remaining budget so the
+		// combined per-repo result never exceeds MaxCommits and the final clip in
+		// Collect cannot drop PR-branch evidence that was within budget.
+		prQuery := q
+		if q.MaxCommits > 0 {
+			remaining := q.MaxCommits - len(commits)
+			if remaining <= 0 {
+				return commits, nil
+			}
+			prQuery.MaxCommits = remaining
+		}
+		prCommits, err := c.pullRequestCommits(ctx, owner, repo, prQuery, seen)
+		if err != nil {
+			return nil, err
+		}
+		commits = append(commits, prCommits...)
+	}
+	return commits, nil
+}
+
+func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q model.Query, seen map[string]bool) ([]model.Commit, error) {
 	opts := &github.CommitsListOptions{
 		Author:      q.Author,
 		Since:       q.Since,
@@ -217,6 +255,10 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 		}
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
+			if seen[cm.SHA] {
+				continue
+			}
+			seen[cm.SHA] = true
 			if needsDetail(q) {
 				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
 					return nil, err
@@ -233,6 +275,120 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 		opts.Page = resp.NextPage
 	}
 	return out, nil
+}
+
+// pullRequestCommits enumerates a repo's open pull requests and returns the
+// author-matching commits on their branches within the query window. These
+// commits are evidence that commit search and default-branch listing miss
+// because the work is not yet merged. Each commit is tagged with its PR source.
+func (c *Client) pullRequestCommits(ctx context.Context, owner, repo string, q model.Query, seen map[string]bool) ([]model.Commit, error) {
+	full := owner + "/" + repo
+	prOpts := &github.PullRequestListOptions{
+		State:       "open",
+		ListOptions: github.ListOptions{PerPage: c.perPage},
+	}
+	var out []model.Commit
+	for {
+		prs, resp, err := c.gh.PullRequests.List(ctx, owner, repo, prOpts)
+		if err != nil {
+			return nil, apiError("list pull requests "+full, err)
+		}
+		for _, pr := range prs {
+			commits, err := c.prBranchCommits(ctx, owner, repo, pr.GetNumber(), q, seen)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, commits...)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				return out, nil
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		prOpts.Page = resp.NextPage
+	}
+	return out, nil
+}
+
+// prBranchCommits returns the author-matching, in-window, not-yet-seen commits
+// on a single pull request, tagged with the PR as their discovery source.
+func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number int, q model.Query, seen map[string]bool) ([]model.Commit, error) {
+	full := owner + "/" + repo
+	source := fmt.Sprintf("pull/%d", number)
+	opts := &github.ListOptions{PerPage: c.perPage}
+	var out []model.Commit
+	for {
+		commits, resp, err := c.gh.PullRequests.ListCommits(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, apiError(fmt.Sprintf("list pr commits %s#%d", full, number), err)
+		}
+		for _, rc := range commits {
+			cm := fromRepoCommit(full, rc)
+			cm.Source = source
+			if !authorMatches(cm, q.Author) || !inWindow(cm.Date, q.Since, q.Until) {
+				continue
+			}
+			if seen[cm.SHA] {
+				continue
+			}
+			seen[cm.SHA] = true
+			if needsDetail(q) {
+				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
+					return nil, err
+				}
+			}
+			out = append(out, cm)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				return out, nil
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return out, nil
+}
+
+// authorEmail returns the bare email address when author is an email — including
+// the "Name <user@example.com>" form that mail.ParseAddress accepts — and
+// whether it was an email at all. A GitHub login cannot contain "@", so its
+// presence is the signal. It is the single normalization point shared by the
+// search qualifier and PR-branch matching so the two cannot diverge.
+func authorEmail(author string) (string, bool) {
+	if addr, err := mail.ParseAddress(author); err == nil && strings.Contains(author, "@") {
+		return addr.Address, true
+	}
+	return author, false
+}
+
+// authorMatches reports whether a commit was authored by the queried identity.
+// The query author may be a GitHub login (matched against the attributed login)
+// or a commit email (matched against the raw author email), mirroring the
+// login/email distinction the search path makes. Email input is normalized to
+// the bare address so the "Name <addr>" form matches just as it does in search.
+func authorMatches(cm model.Commit, author string) bool {
+	target := author
+	if email, ok := authorEmail(author); ok {
+		target = email
+	}
+	a := strings.ToLower(strings.TrimSpace(target))
+	if a == "" {
+		return false
+	}
+	return strings.ToLower(cm.Author) == a || strings.ToLower(cm.Email) == a
+}
+
+// inWindow reports whether t falls within [since, until]. A zero bound is open.
+func inWindow(t, since, until time.Time) bool {
+	if !since.IsZero() && t.Before(since) {
+		return false
+	}
+	if !until.IsZero() && t.After(until) {
+		return false
+	}
+	return true
 }
 
 func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
@@ -314,8 +470,21 @@ func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
 	return out
 }
 
+// authorQualifier picks the GitHub commit-search qualifier for the author
+// input. A raw commit email must use author-email: — GitHub's commit search
+// does not match an email against the author: qualifier, so emitting author:
+// for an email silently returns zero results. It uses the bare parsed address
+// (via authorEmail), so the "Name <user@example.com>" form yields a valid
+// qualifier rather than one with spaces/angle brackets.
+func authorQualifier(author string) string {
+	if email, ok := authorEmail(author); ok {
+		return "author-email:" + email
+	}
+	return "author:" + author
+}
+
 func buildSearchQuery(q model.Query) string {
-	parts := []string{"author:" + q.Author}
+	parts := []string{authorQualifier(q.Author)}
 	if !q.Since.IsZero() || !q.Until.IsZero() {
 		since := "*"
 		if !q.Since.IsZero() {
@@ -348,6 +517,7 @@ func fromSearchResult(cr *github.CommitResult) model.Commit {
 		Author:  cr.GetAuthor().GetLogin(),
 		Repo:    cr.GetRepository().GetFullName(),
 		Message: cr.GetCommit().GetMessage(),
+		Source:  "search",
 	}
 	if a := cr.GetCommit().GetAuthor(); a != nil {
 		cm.AuthorName = a.GetName()
@@ -364,6 +534,7 @@ func fromRepoCommit(repoFull string, rc *github.RepositoryCommit) model.Commit {
 		Author:  rc.GetAuthor().GetLogin(),
 		Repo:    repoFull,
 		Message: rc.GetCommit().GetMessage(),
+		Source:  "repo",
 	}
 	if a := rc.GetCommit().GetAuthor(); a != nil {
 		cm.AuthorName = a.GetName()

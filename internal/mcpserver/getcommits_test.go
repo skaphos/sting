@@ -123,6 +123,59 @@ func TestGetCommitsSuccess(t *testing.T) {
 	}
 }
 
+// TestGetCommitsIncludePRs covers the include_prs input branch: with the flag
+// set on a repos-scope query, the handler discovers a commit on an open PR
+// branch in addition to the default-branch commit.
+func TestGetCommitsIncludePRs(t *testing.T) {
+	const repoCommits = `[{"sha":"def456","author":{"login":"octocat"},"commit":{"message":"merged work","author":{"name":"Octo","email":"octo@example.com","date":"2026-05-21T11:00:00Z"}}}]`
+	const openPRs = `[{"number":5,"state":"open"}]`
+	const prCommits = `[{"sha":"pr789","html_url":"https://example.com/c/pr789","author":{"login":"octocat"},"commit":{"message":"wip on branch","author":{"name":"Octo","email":"octo@example.com","date":"2026-05-22T09:00:00Z"}}}]`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/pulls/5/commits"):
+			_, _ = w.Write([]byte(prCommits))
+		case strings.Contains(r.URL.Path, "/pulls"):
+			_, _ = w.Write([]byte(openPRs))
+		case strings.Contains(r.URL.Path, "/commits"):
+			_, _ = w.Write([]byte(repoCommits))
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := newTestHandler(t, srv)
+
+	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author:     "octocat",
+		Scope:      "repos",
+		Repos:      []string{"skaphos/sting"},
+		Since:      "2026-05-01",
+		Until:      "2026-05-31",
+		IncludePRs: true,
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected non-error result, got %+v", res)
+	}
+	if mr.Count != 2 {
+		t.Fatalf("Count = %d, want 2 (default-branch + PR-branch)", mr.Count)
+	}
+	var foundPR bool
+	for _, cm := range mr.Commits {
+		if cm.SHA == "pr789" && cm.Source == "pull/5" {
+			foundPR = true
+		}
+	}
+	if !foundPR {
+		t.Errorf("expected PR-branch commit pr789 tagged source pull/5; got %+v", mr.Commits)
+	}
+}
+
 func TestGetCommitsGitLabSuccess(t *testing.T) {
 	const payload = `[
 		{

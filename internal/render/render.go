@@ -98,6 +98,11 @@ func toMarkdown(r model.Result) string {
 			}
 			fmt.Fprintf(&b, "- `%s` %s — %s",
 				sha, c.Date.UTC().Format("2006-01-02"), c.Summary())
+			// Flag commits discovered on an open PR branch: they are unmerged
+			// evidence, so the source matters for an auditor reading the report.
+			if strings.HasPrefix(c.Source, "pull/") {
+				fmt.Fprintf(&b, " [%s]", c.Source)
+			}
 			if c.Additions != 0 || c.Deletions != 0 {
 				fmt.Fprintf(&b, " (+%d/-%d", c.Additions, c.Deletions)
 				if c.Changes != 0 {

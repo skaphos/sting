@@ -207,6 +207,135 @@ func TestCollectScopeOrg(t *testing.T) {
 	}
 }
 
+// openPRsBody lists one open pull request, number 5.
+const openPRsBody = `[{"number": 5, "state": "open"}]`
+
+// prCommitsBody is the commit list for PR #5. It contains: a commit already on
+// the default branch (def456, must dedup), an in-window commit by the queried
+// author on the PR branch (pr789, the target evidence), a commit by a different
+// author (other1, must be filtered), and an out-of-window commit by the author
+// (old1, must be filtered).
+const prCommitsBody = `[
+  {
+    "sha": "def456",
+    "author": {"login": "octocat"},
+    "commit": {"message": "repo commit message", "author": {"name": "Octo Cat", "email": "octo@example.com", "date": "2026-05-21T11:00:00Z"}}
+  },
+  {
+    "sha": "pr789",
+    "html_url": "https://example.com/c/pr789",
+    "author": {"login": "octocat"},
+    "commit": {"message": "wip on PR branch", "author": {"name": "Octo Cat", "email": "octo@example.com", "date": "2026-05-22T09:00:00Z"}}
+  },
+  {
+    "sha": "other1",
+    "author": {"login": "someoneelse"},
+    "commit": {"message": "not our author", "author": {"name": "Someone Else", "email": "else@example.com", "date": "2026-05-22T09:30:00Z"}}
+  },
+  {
+    "sha": "old1",
+    "author": {"login": "octocat"},
+    "commit": {"message": "before the window", "author": {"name": "Octo Cat", "email": "octo@example.com", "date": "2026-04-01T09:00:00Z"}}
+  }
+]`
+
+func TestCollectScopeReposWithPullRequests(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/pulls/5/commits"):
+			_, _ = w.Write([]byte(prCommitsBody))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/pulls"):
+			_, _ = w.Write([]byte(openPRsBody))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(repoCommitsBody))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:              "octocat",
+		Scope:               model.ScopeRepos,
+		Repos:               []string{"skaphos/sting"},
+		Since:               time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		Until:               time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC),
+		IncludePullRequests: true,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	bySHA := map[string]model.Commit{}
+	for _, cm := range res.Commits {
+		bySHA[cm.SHA] = cm
+	}
+	if len(res.Commits) != 2 {
+		t.Fatalf("len(Commits) = %d, want 2; got %v", len(res.Commits), bySHA)
+	}
+	repoCommit, ok := bySHA["def456"]
+	if !ok {
+		t.Fatal("missing default-branch commit def456")
+	}
+	if repoCommit.Source != "repo" {
+		t.Errorf("def456 Source = %q, want repo", repoCommit.Source)
+	}
+	prCommit, ok := bySHA["pr789"]
+	if !ok {
+		t.Fatal("missing PR-branch commit pr789")
+	}
+	if prCommit.Source != "pull/5" {
+		t.Errorf("pr789 Source = %q, want pull/5", prCommit.Source)
+	}
+	if _, ok := bySHA["other1"]; ok {
+		t.Error("other1 (different author) should have been filtered out")
+	}
+	if _, ok := bySHA["old1"]; ok {
+		t.Error("old1 (out of window) should have been filtered out")
+	}
+}
+
+// TestCollectReposPullRequestsRespectMaxCommits verifies that once the
+// default-branch listing fills MaxCommits for a repo, PR enumeration is skipped
+// entirely (no wasted API calls) rather than fetching commits the final clip
+// would discard.
+func TestCollectReposPullRequestsRespectMaxCommits(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/pulls"):
+			t.Errorf("PR enumeration should be skipped once MaxCommits is reached; got %q", r.URL.Path)
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(repoCommitsBody)) // one commit, def456
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:              "octocat",
+		Scope:               model.ScopeRepos,
+		Repos:               []string{"skaphos/sting"},
+		IncludePullRequests: true,
+		MaxCommits:          1,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 1 || len(res.Commits) != 1 {
+		t.Fatalf("Count = %d, len = %d, want 1/1", res.Count, len(res.Commits))
+	}
+	if res.Commits[0].SHA != "def456" {
+		t.Errorf("SHA = %q, want def456", res.Commits[0].SHA)
+	}
+}
+
 func TestCollectUnsupportedScope(t *testing.T) {
 	c, err := New("", "", 10)
 	if err != nil {

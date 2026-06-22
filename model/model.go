@@ -65,8 +65,9 @@ type Query struct {
 	// Provider is the source control provider to query.
 	Provider Provider
 	// Author is the provider author identifier whose commits are wanted. For
-	// GitHub this is a login (or, for search, may be an email). For GitLab this
-	// is matched against the commit author string.
+	// GitHub this is a login or an email; in the search scope an email is
+	// matched with the author-email: qualifier and a login with author:. For
+	// GitLab this is matched against the commit author string.
 	Author string
 	// Since and Until bound the commit author date, inclusive. A zero Until
 	// means "now".
@@ -91,6 +92,13 @@ type Query struct {
 	MaxDiffBytes int
 	// MaxCommits caps the number of commits returned (0 = no cap).
 	MaxCommits int
+	// IncludePullRequests augments repos/org discovery with commits found on
+	// open pull-request branches. These commits are not yet on a default branch,
+	// so commit search and branch listing miss them; enabling this enumerates
+	// open PRs per repo and merges author-matching commits as evidence. It costs
+	// extra API calls (one PR list + one commit list per PR), so it is off by
+	// default. GitHub only; ignored for GitLab.
+	IncludePullRequests bool
 }
 
 // Commit is a normalized commit record independent of the GitHub API shape.
@@ -103,10 +111,15 @@ type Commit struct {
 	Date       time.Time `json:"date"`             // git author date
 	Message    string    `json:"message"`          // full commit message
 	URL        string    `json:"url"`              // html_url
-	Additions  int       `json:"additions,omitempty"`
-	Deletions  int       `json:"deletions,omitempty"`
-	Changes    int       `json:"changes,omitempty"`
-	Files      []File    `json:"files,omitempty"`
+	// Source records how the commit was discovered so a match is auditable:
+	// "search" (commit search index), "repo" (default-branch listing), or
+	// "pull/<n>" (open pull-request branch). Empty for provider paths that do
+	// not tag a source (e.g. GitLab).
+	Source    string `json:"source,omitempty"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+	Changes   int    `json:"changes,omitempty"`
+	Files     []File `json:"files,omitempty"`
 }
 
 // File is a normalized file-level change record for a commit.
