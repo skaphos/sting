@@ -27,6 +27,7 @@ var queryCmd = &cobra.Command{
 		"This is the primary CLI surface for ad-hoc queries; the identical " +
 		"engine powers the MCP get_commits tool. All query flags are also " +
 		"accepted directly on the root command for brevity.",
+	Args: cobra.NoArgs,
 	RunE: runQuery,
 }
 
