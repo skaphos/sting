@@ -2,7 +2,7 @@ module github.com/skaphos/sting
 
 go 1.26
 
-toolchain go1.26.3
+toolchain go1.26.4
 
 require (
 	github.com/atotto/clipboard v0.1.4
