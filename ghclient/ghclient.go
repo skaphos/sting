@@ -157,14 +157,13 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 	if len(q.Repos) == 0 {
 		return nil, fmt.Errorf("scope %q requires at least one repo", model.ScopeRepos)
 	}
-	seen := map[string]bool{}
 	var out []model.Commit
 	for _, target := range q.Repos {
 		owner, repo, ok := splitRepo(target)
 		if !ok {
 			return nil, fmt.Errorf("invalid repo %q (want owner/repo)", target)
 		}
-		commits, err := c.collectRepo(ctx, owner, repo, q, seen)
+		commits, err := c.collectRepo(ctx, owner, repo, q)
 		if err != nil {
 			return nil, err
 		}
@@ -185,14 +184,13 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
 	var out []model.Commit
 	for _, full := range repos {
 		owner, repo, ok := splitRepo(full)
 		if !ok {
 			continue
 		}
-		commits, err := c.collectRepo(ctx, owner, repo, q, seen)
+		commits, err := c.collectRepo(ctx, owner, repo, q)
 		if err != nil {
 			return nil, err
 		}
@@ -206,10 +204,14 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 
 // collectRepo gathers a repo's default-branch commits and, when the query opts
 // into pull-request discovery, the author-matching commits on open PR branches
-// that are not yet reachable from the default branch. seen dedups SHAs across
-// the default-branch listing and every open PR (a commit can appear in multiple
-// PRs and may already be on the default branch).
-func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Query, seen map[string]bool) ([]model.Commit, error) {
+// that are not yet reachable from the default branch. The seen set dedups SHAs
+// within this one repository — across the default-branch listing and every open
+// PR (a commit can appear in multiple PRs and may already be on the default
+// branch). It is intentionally per-repo: a SHA is only unique within a repo, so
+// deduping across repos (e.g. forks with shared history) would drop legitimate
+// evidence.
+func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Query) ([]model.Commit, error) {
+	seen := map[string]bool{}
 	commits, err := c.listRepoCommits(ctx, owner, repo, q, seen)
 	if err != nil {
 		return nil, err
@@ -444,8 +446,12 @@ func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
 // for an email silently returns zero results. A GitHub login cannot contain
 // "@", so a parseable address is a reliable signal for email input.
 func authorQualifier(author string) string {
-	if _, err := mail.ParseAddress(author); err == nil && strings.Contains(author, "@") {
-		return "author-email:" + author
+	// Use the parsed address, not the raw input: mail.ParseAddress also accepts
+	// "Name <user@example.com>", and concatenating that raw string would emit an
+	// invalid author-email: qualifier (spaces/angle brackets). addr.Address is
+	// the bare email.
+	if addr, err := mail.ParseAddress(author); err == nil && strings.Contains(author, "@") {
+		return "author-email:" + addr.Address
 	}
 	return "author:" + author
 }

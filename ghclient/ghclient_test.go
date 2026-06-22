@@ -51,6 +51,7 @@ func TestAuthorQualifier(t *testing.T) {
 		{"shawn.stratton@alaskaair.com", "author-email:shawn.stratton@alaskaair.com"},
 		{"octocat", "author:octocat"},
 		{"user@example.com", "author-email:user@example.com"},
+		{"Mended Link <mended@example.com>", "author-email:mended@example.com"},
 	}
 	for _, tt := range tests {
 		if got := authorQualifier(tt.in); got != tt.want {
