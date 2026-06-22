@@ -298,6 +298,44 @@ func TestCollectScopeReposWithPullRequests(t *testing.T) {
 	}
 }
 
+// TestCollectReposPullRequestsRespectMaxCommits verifies that once the
+// default-branch listing fills MaxCommits for a repo, PR enumeration is skipped
+// entirely (no wasted API calls) rather than fetching commits the final clip
+// would discard.
+func TestCollectReposPullRequestsRespectMaxCommits(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/pulls"):
+			t.Errorf("PR enumeration should be skipped once MaxCommits is reached; got %q", r.URL.Path)
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(repoCommitsBody)) // one commit, def456
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:              "octocat",
+		Scope:               model.ScopeRepos,
+		Repos:               []string{"skaphos/sting"},
+		IncludePullRequests: true,
+		MaxCommits:          1,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 1 || len(res.Commits) != 1 {
+		t.Fatalf("Count = %d, len = %d, want 1/1", res.Count, len(res.Commits))
+	}
+	if res.Commits[0].SHA != "def456" {
+		t.Errorf("SHA = %q, want def456", res.Commits[0].SHA)
+	}
+}
+
 func TestCollectUnsupportedScope(t *testing.T) {
 	c, err := New("", "", 10)
 	if err != nil {

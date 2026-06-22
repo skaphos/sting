@@ -60,6 +60,27 @@ func TestAuthorQualifier(t *testing.T) {
 	}
 }
 
+func TestAuthorMatches(t *testing.T) {
+	cm := model.Commit{Author: "octocat", Email: "octo@example.com"}
+	cases := []struct {
+		author string
+		want   bool
+	}{
+		{"octocat", true},
+		{"OCTOCAT", true},
+		{"octo@example.com", true},
+		{"Octo Cat <octo@example.com>", true}, // angle-bracket form normalizes to the bare email
+		{"someoneelse", false},
+		{"other@example.com", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := authorMatches(cm, c.author); got != c.want {
+			t.Errorf("authorMatches(%q) = %v, want %v", c.author, got, c.want)
+		}
+	}
+}
+
 func TestBuildSearchQueryWithOrg(t *testing.T) {
 	got := buildSearchQuery(model.Query{Author: "mfacenet", Org: "Alaska-Airlines-Shared"})
 	want := "author:mfacenet org:Alaska-Airlines-Shared"

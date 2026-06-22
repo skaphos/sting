@@ -217,7 +217,20 @@ func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Qu
 		return nil, err
 	}
 	if q.IncludePullRequests {
-		prCommits, err := c.pullRequestCommits(ctx, owner, repo, q, seen)
+		// Keep PR discovery within the per-repo cap: the default-branch listing
+		// may have already filled it, in which case skip PR enumeration entirely
+		// (no wasted API calls), otherwise only fetch the remaining budget so the
+		// combined per-repo result never exceeds MaxCommits and the final clip in
+		// Collect cannot drop PR-branch evidence that was within budget.
+		prQuery := q
+		if q.MaxCommits > 0 {
+			remaining := q.MaxCommits - len(commits)
+			if remaining <= 0 {
+				return commits, nil
+			}
+			prQuery.MaxCommits = remaining
+		}
+		prCommits, err := c.pullRequestCommits(ctx, owner, repo, prQuery, seen)
 		if err != nil {
 			return nil, err
 		}
@@ -338,12 +351,29 @@ func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number
 	return out, nil
 }
 
+// authorEmail returns the bare email address when author is an email — including
+// the "Name <user@example.com>" form that mail.ParseAddress accepts — and
+// whether it was an email at all. A GitHub login cannot contain "@", so its
+// presence is the signal. It is the single normalization point shared by the
+// search qualifier and PR-branch matching so the two cannot diverge.
+func authorEmail(author string) (string, bool) {
+	if addr, err := mail.ParseAddress(author); err == nil && strings.Contains(author, "@") {
+		return addr.Address, true
+	}
+	return author, false
+}
+
 // authorMatches reports whether a commit was authored by the queried identity.
 // The query author may be a GitHub login (matched against the attributed login)
 // or a commit email (matched against the raw author email), mirroring the
-// login/email distinction the search path makes.
+// login/email distinction the search path makes. Email input is normalized to
+// the bare address so the "Name <addr>" form matches just as it does in search.
 func authorMatches(cm model.Commit, author string) bool {
-	a := strings.ToLower(strings.TrimSpace(author))
+	target := author
+	if email, ok := authorEmail(author); ok {
+		target = email
+	}
+	a := strings.ToLower(strings.TrimSpace(target))
 	if a == "" {
 		return false
 	}
@@ -443,15 +473,12 @@ func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
 // authorQualifier picks the GitHub commit-search qualifier for the author
 // input. A raw commit email must use author-email: — GitHub's commit search
 // does not match an email against the author: qualifier, so emitting author:
-// for an email silently returns zero results. A GitHub login cannot contain
-// "@", so a parseable address is a reliable signal for email input.
+// for an email silently returns zero results. It uses the bare parsed address
+// (via authorEmail), so the "Name <user@example.com>" form yields a valid
+// qualifier rather than one with spaces/angle brackets.
 func authorQualifier(author string) string {
-	// Use the parsed address, not the raw input: mail.ParseAddress also accepts
-	// "Name <user@example.com>", and concatenating that raw string would emit an
-	// invalid author-email: qualifier (spaces/angle brackets). addr.Address is
-	// the bare email.
-	if addr, err := mail.ParseAddress(author); err == nil && strings.Contains(author, "@") {
-		return "author-email:" + addr.Address
+	if email, ok := authorEmail(author); ok {
+		return "author-email:" + email
 	}
 	return "author:" + author
 }
