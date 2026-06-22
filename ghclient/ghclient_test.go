@@ -26,6 +26,61 @@ func TestBuildSearchQueryOpenEnded(t *testing.T) {
 	}
 }
 
+func TestBuildSearchQueryEmail(t *testing.T) {
+	got := buildSearchQuery(model.Query{Author: "shawn.stratton@alaskaair.com"})
+	want := "author-email:shawn.stratton@alaskaair.com"
+	if got != want {
+		t.Errorf("buildSearchQuery = %q, want %q", got, want)
+	}
+}
+
+func TestBuildSearchQueryEmailWithOrg(t *testing.T) {
+	got := buildSearchQuery(model.Query{Author: "shawn.stratton@alaskaair.com", Org: "Alaska-Airlines-Shared"})
+	want := "author-email:shawn.stratton@alaskaair.com org:Alaska-Airlines-Shared"
+	if got != want {
+		t.Errorf("buildSearchQuery = %q, want %q", got, want)
+	}
+}
+
+func TestAuthorQualifier(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"mfacenet", "author:mfacenet"},
+		{"shawn.stratton@alaskaair.com", "author-email:shawn.stratton@alaskaair.com"},
+		{"octocat", "author:octocat"},
+		{"user@example.com", "author-email:user@example.com"},
+		{"Mended Link <mended@example.com>", "author-email:mended@example.com"},
+	}
+	for _, tt := range tests {
+		if got := authorQualifier(tt.in); got != tt.want {
+			t.Errorf("authorQualifier(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestAuthorMatches(t *testing.T) {
+	cm := model.Commit{Author: "octocat", Email: "octo@example.com"}
+	cases := []struct {
+		author string
+		want   bool
+	}{
+		{"octocat", true},
+		{"OCTOCAT", true},
+		{"octo@example.com", true},
+		{"Octo Cat <octo@example.com>", true}, // angle-bracket form normalizes to the bare email
+		{"someoneelse", false},
+		{"other@example.com", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := authorMatches(cm, c.author); got != c.want {
+			t.Errorf("authorMatches(%q) = %v, want %v", c.author, got, c.want)
+		}
+	}
+}
+
 func TestBuildSearchQueryWithOrg(t *testing.T) {
 	got := buildSearchQuery(model.Query{Author: "mfacenet", Org: "Alaska-Airlines-Shared"})
 	want := "author:mfacenet org:Alaska-Airlines-Shared"

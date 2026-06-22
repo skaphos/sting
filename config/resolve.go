@@ -28,6 +28,8 @@ type Request struct {
 	IncludeDiffs *bool
 	// MaxDiffBytes overrides the default when non-nil.
 	MaxDiffBytes *int
+	// IncludePullRequests overrides the default when non-nil.
+	IncludePullRequests *bool
 }
 
 // Resolve turns a Request into a validated model.Query, applying defaults from
@@ -128,18 +130,24 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		return model.Query{}, fmt.Errorf("max_diff_bytes must be >= 0, got %d", maxDiffBytes)
 	}
 
+	includePRs := cfg.IncludePullRequests
+	if req.IncludePullRequests != nil {
+		includePRs = *req.IncludePullRequests
+	}
+
 	return model.Query{
-		Provider:     provider,
-		Author:       req.Author,
-		Since:        since,
-		Until:        until,
-		Scope:        scope,
-		Repos:        repos,
-		Org:          org,
-		IncludeStats: includeStats,
-		IncludeFiles: includeFiles,
-		IncludeDiffs: includeDiffs,
-		MaxDiffBytes: maxDiffBytes,
-		MaxCommits:   cfg.MaxCommits,
+		Provider:            provider,
+		Author:              req.Author,
+		Since:               since,
+		Until:               until,
+		Scope:               scope,
+		Repos:               repos,
+		Org:                 org,
+		IncludeStats:        includeStats,
+		IncludeFiles:        includeFiles,
+		IncludeDiffs:        includeDiffs,
+		MaxDiffBytes:        maxDiffBytes,
+		MaxCommits:          cfg.MaxCommits,
+		IncludePullRequests: includePRs,
 	}, nil
 }

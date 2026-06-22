@@ -177,6 +177,13 @@ flags when you want an agent to explain the actual code changes:
 - `--diffs` adds patch text for each changed file and implies `--files`.
 - `--max-diff-bytes` caps patch text per commit; truncated files are marked in
   JSON and Markdown.
+- `--prs` (GitHub, `scope=repos`/`org`) also discovers commits on **open
+  pull-request branches**. Unmerged work is not on a default branch, so commit
+  search and branch listing miss it; this enumerates open PRs per repo and
+  merges author-matching, in-window commits. Each result carries a `source`
+  field (`search`, `repo`, or `pull/<n>`) so the discovery origin is auditable,
+  and Markdown flags PR-branch commits with `[pull/<n>]`. It costs extra API
+  calls (one PR list plus one commit list per open PR), so it is off by default.
 
 GitHub fetches this evidence from per-commit detail calls. GitLab uses
 `with_stats` for line stats and commit diff calls for file evidence. Keep full
@@ -187,7 +194,7 @@ LLM context.
 
 | provider | scope    | how it finds commits                                             | notes                                               |
 |----------|----------|------------------------------------------------------------------|-----------------------------------------------------|
-| GitHub   | `search` | GitHub commit search by `author:`                                | global (public-only) unless scoped; 1000-result cap |
+| GitHub   | `search` | GitHub commit search by `author:` (or `author-email:` for emails) | global (public-only) unless scoped; 1000-result cap |
 | GitHub   | `repos`  | lists commits in each `owner/repo` you name, filtered by author  | most complete; supports private repos with a token  |
 | GitHub   | `org`    | enumerates an org's repos, then lists commits in each            | needs org read access for private repos             |
 | GitLab   | `repos`  | lists commits in each `group/project` or project ID              | supports nested group paths; GitLab search not used |
@@ -207,6 +214,13 @@ combining `search` with `--org` (or `--repos`):
 # Adds `org:Alaska-Airlines-Shared` to the search query.
 sting --author mfacenet --scope search --org Alaska-Airlines-Shared --window 7d
 ```
+
+`--author` accepts either a GitHub login or a commit email. An email is
+detected automatically and queried with the `author-email:` qualifier, since
+GitHub's commit search does not match emails against `author:`. Note the two can
+return different results: a login matches commits GitHub attributes to that
+account, while an email matches the raw commit author regardless of account
+linkage.
 
 Two requirements for any private-org result:
 
@@ -252,6 +266,7 @@ directory, or pointed at explicitly with `--config path.yaml`.
 | `include_files`    | `STING_INCLUDE_FILES`   | (`--files`)          | `false`    | fetch changed file summaries             |
 | `include_diffs`    | `STING_INCLUDE_DIFFS`   | (`--diffs`)          | `false`    | fetch bounded patch text                 |
 | `max_diff_bytes`   | `STING_MAX_DIFF_BYTES`  | (`--max-diff-bytes`) | `60000`    | per-commit patch byte cap                |
+| `include_prs`      | `STING_INCLUDE_PRS`     | (`--prs`)            | `false`    | discover open-PR branch commits (GitHub) |
 
 Keys in parentheses are per-query request flags that override the resolved
 default for a single invocation. See `config.example.yaml`.
