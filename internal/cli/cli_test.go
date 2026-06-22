@@ -718,7 +718,7 @@ func TestQuerySubcommandWiredWithFlags(t *testing.T) {
 
 	wantFlags := []string{
 		"provider", "author", "since", "until", "window", "scope",
-		"repos", "org", "format", "stats", "files", "diffs", "max-diff-bytes",
+		"repos", "org", "format", "stats", "files", "diffs", "max-diff-bytes", "prs",
 	}
 	for _, name := range wantFlags {
 		if sub.Flags().Lookup(name) == nil {
