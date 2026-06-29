@@ -67,7 +67,9 @@ func toMarkdown(r model.Result) string {
 	if r.Truncated {
 		b.WriteString(" _(truncated)_")
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	writeSkipped(&b, r.Skipped)
+	b.WriteString("\n")
 
 	if r.Count == 0 {
 		b.WriteString("_No commits found in this window._\n")
@@ -118,6 +120,22 @@ func toMarkdown(r model.Result) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// writeSkipped notes any repositories an org scan skipped, so a partial result
+// is visibly partial rather than silently short. It writes nothing when none
+// were skipped.
+func writeSkipped(b *strings.Builder, skipped []model.SkippedRepo) {
+	if len(skipped) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "- **Skipped:** %d repo(s) could not be read\n", len(skipped))
+	sorted := make([]model.SkippedRepo, len(skipped))
+	copy(sorted, skipped)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Repo < sorted[j].Repo })
+	for _, s := range sorted {
+		fmt.Fprintf(b, "  - `%s` — %s\n", s.Repo, s.Reason)
+	}
 }
 
 func writeFileChange(b *strings.Builder, f model.File) {

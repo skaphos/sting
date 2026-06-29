@@ -207,6 +207,79 @@ func TestCollectScopeOrg(t *testing.T) {
 	}
 }
 
+// TestCollectScopeOrgSkipsBadRepo verifies that an org scan does not abort when
+// one repo cannot be listed (here an empty repo returning 409): the bad repo is
+// recorded in Result.Skipped and enumeration continues to the healthy repo.
+func TestCollectScopeOrgSkipsBadRepo(t *testing.T) {
+	const twoRepos = `[{"full_name":"skaphos/empty"},{"full_name":"skaphos/sting"}]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/orgs/skaphos/repos"):
+			_, _ = w.Write([]byte(twoRepos))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/empty/commits"):
+			http.Error(w, `{"message":"Git Repository is empty."}`, http.StatusConflict)
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(repoCommitsBody))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat",
+		Scope:  model.ScopeOrg,
+		Org:    "skaphos",
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v (org scan must not abort on one bad repo)", err)
+	}
+	if res.Count != 1 || len(res.Commits) != 1 {
+		t.Fatalf("Count = %d, len = %d, want 1/1 (healthy repo only)", res.Count, len(res.Commits))
+	}
+	if res.Commits[0].SHA != "def456" {
+		t.Errorf("SHA = %q, want def456", res.Commits[0].SHA)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want exactly one entry", res.Skipped)
+	}
+	if res.Skipped[0].Repo != "skaphos/empty" || res.Skipped[0].Reason != "empty repository" {
+		t.Errorf("Skipped[0] = %+v, want {skaphos/empty empty repository}", res.Skipped[0])
+	}
+}
+
+// TestCollectScopeOrgAbortsOnFatal verifies that a global failure (here a 5xx)
+// still aborts the org scan rather than being silently skipped per repo — only
+// per-repo conditions are skippable.
+func TestCollectScopeOrgAbortsOnFatal(t *testing.T) {
+	const oneRepo = `[{"full_name":"skaphos/sting"}]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/orgs/skaphos/repos"):
+			_, _ = w.Write([]byte(oneRepo))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	if _, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat",
+		Scope:  model.ScopeOrg,
+		Org:    "skaphos",
+	}); err == nil {
+		t.Fatal("Collect: want error on 5xx; global failures must not be skipped")
+	}
+}
+
 // openPRsBody lists one open pull request, number 5.
 const openPRsBody = `[{"number": 5, "state": "open"}]`
 
