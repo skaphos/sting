@@ -78,6 +78,27 @@ func TestMarkdownEmpty(t *testing.T) {
 	}
 }
 
+func TestMarkdownSkipped(t *testing.T) {
+	r := model.Result{
+		Author: "x", Scope: model.ScopeOrg, Count: 0,
+		Skipped: []model.SkippedRepo{
+			{Repo: "skaphos/terraform-deleteMe", Reason: "empty repository"},
+			{Repo: "skaphos/secret", Reason: "access forbidden"},
+		},
+	}
+	md := Markdown(r)
+	if !strings.Contains(md, "**Skipped:** 2 repo(s)") {
+		t.Errorf("skip summary missing:\n%s", md)
+	}
+	if !strings.Contains(md, "`skaphos/terraform-deleteMe` — empty repository") {
+		t.Errorf("skip detail missing:\n%s", md)
+	}
+	// Skips must surface even when there are no commits to report.
+	if !strings.Contains(md, "No commits found") {
+		t.Error("empty-with-skips should still note no commits")
+	}
+}
+
 func TestRenderJSONRoundTrip(t *testing.T) {
 	out, err := Render(sampleResult(), FormatJSON)
 	if err != nil {

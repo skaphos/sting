@@ -3,6 +3,7 @@ package ghclient
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,44 @@ func TestAPIErrorClassification(t *testing.T) {
 	plain := github.ErrorResponse{Message: "boom"}
 	if got := apiError("op", &plain); !strings.Contains(got.Error(), "op:") {
 		t.Errorf("plain error = %q", got)
+	}
+}
+
+// TestSkipRepoReason checks which per-repo failures an org scan skips past and
+// which global failures it still treats as fatal.
+func TestSkipRepoReason(t *testing.T) {
+	status := func(code int) error {
+		return apiError("op", &github.ErrorResponse{
+			Response: &http.Response{StatusCode: code},
+			Message:  "x",
+		})
+	}
+	cases := []struct {
+		name   string
+		err    error
+		reason string
+		skip   bool
+	}{
+		{"empty 409", status(http.StatusConflict), "empty repository", true},
+		{"not found 404", status(http.StatusNotFound), "not found", true},
+		{"gone 410", status(http.StatusGone), "gone", true},
+		{"forbidden 403", status(http.StatusForbidden), "access forbidden", true},
+		{"legal 451", status(http.StatusUnavailableForLegalReasons), "unavailable for legal reasons", true},
+		{"server 500 fatal", status(http.StatusInternalServerError), "", false},
+		{"bad request 400 fatal", status(http.StatusBadRequest), "", false},
+		{"rate limit fatal", apiError("op", &github.RateLimitError{
+			Rate: github.Rate{Reset: github.Timestamp{Time: time.Unix(0, 0)}}, Message: "limit",
+		}), "", false},
+		{"secondary rate limit fatal", apiError("op", &github.AbuseRateLimitError{Message: "slow down"}), "", false},
+		{"non-github error fatal", errors.New("dial tcp: connection refused"), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, skip := skipRepoReason(tc.err)
+			if skip != tc.skip || reason != tc.reason {
+				t.Errorf("skipRepoReason = (%q, %v), want (%q, %v)", reason, skip, tc.reason, tc.skip)
+			}
+		})
 	}
 }
 

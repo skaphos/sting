@@ -6,6 +6,7 @@ package gitlabclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,13 +71,14 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 
 	var (
 		commits []model.Commit
+		skipped []model.SkippedRepo
 		err     error
 	)
 	switch q.Scope {
 	case model.ScopeRepos:
 		commits, err = c.listRepos(ctx, q)
 	case model.ScopeOrg:
-		commits, err = c.listGroup(ctx, q)
+		commits, skipped, err = c.listGroup(ctx, q)
 	case model.ScopeSearch:
 		return model.Result{}, fmt.Errorf("provider %q does not support scope %q (use repos or org)", model.ProviderGitLab, q.Scope)
 	default:
@@ -103,6 +105,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		Count:         len(commits),
 		Commits:       commits,
 		Truncated:     truncated,
+		Skipped:       skipped,
 	}, nil
 }
 
@@ -128,15 +131,23 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 	return out, nil
 }
 
-func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, error) {
+// listGroup enumerates a group's projects (including subgroups) and lists
+// commits in each. As with the GitHub org scope, a per-project commit-list
+// failure (e.g. an empty repo, or one the token cannot read) is recorded in the
+// returned skip list and the scan continues; global failures still abort. See
+// skipProjectReason.
+func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, []model.SkippedRepo, error) {
 	if strings.TrimSpace(q.Org) == "" {
-		return nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
+		return nil, nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
 	}
 	projects, err := c.groupProjects(ctx, q.Org)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []model.Commit
+	var (
+		out     []model.Commit
+		skipped []model.SkippedRepo
+	)
 	for _, project := range projects {
 		target := strconv.FormatInt(project.ID, 10)
 		label := project.PathWithNamespace
@@ -145,14 +156,18 @@ func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, 
 		}
 		commits, err := c.listProjectCommits(ctx, target, label, q)
 		if err != nil {
-			return nil, err
+			if reason, skip := skipProjectReason(err); skip {
+				skipped = append(skipped, model.SkippedRepo{Repo: label, Reason: reason})
+				continue
+			}
+			return nil, nil, err
 		}
 		out = append(out, commits...)
 		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 			break
 		}
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel string, q model.Query) ([]model.Commit, error) {
@@ -245,12 +260,49 @@ func (c *Client) get(ctx context.Context, op, endpoint string, values url.Values
 		if msg == "" {
 			msg = resp.Status
 		}
-		return "", fmt.Errorf("%s: gitlab api status %d: %s", op, resp.StatusCode, msg)
+		return "", &statusError{op: op, status: resp.StatusCode, msg: msg}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
 		return "", fmt.Errorf("%s: decode response: %w", op, err)
 	}
 	return resp.Header.Get("X-Next-Page"), nil
+}
+
+// statusError is a non-2xx GitLab API response. Keeping the status code typed
+// (rather than only in the message string) lets an org scan classify per-project
+// failures and skip past them. Its message is unchanged from the prior inline
+// fmt.Errorf form, so callers that match on the text still work.
+type statusError struct {
+	op     string
+	status int
+	msg    string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%s: gitlab api status %d: %s", e.op, e.status, e.msg)
+}
+
+// skipProjectReason mirrors ghclient.skipRepoReason for GitLab: it reports
+// whether a per-project commit-list failure is specific to one project and so
+// can be skipped without aborting a whole group scan. The group's project list
+// already succeeded, so a failure now is a per-project condition — not found or
+// not visible to the token (404), access denied (403), or an empty repository
+// (409). Rate limits (429), server errors (5xx), and other faults are global,
+// so they return false and the caller aborts.
+func skipProjectReason(err error) (string, bool) {
+	var se *statusError
+	if !errors.As(err, &se) {
+		return "", false
+	}
+	switch se.status {
+	case http.StatusNotFound: // 404: gone or not visible to the token
+		return "not found", true
+	case http.StatusForbidden: // 403: access denied to this project
+		return "access forbidden", true
+	case http.StatusConflict: // 409: empty repository
+		return "empty repository", true
+	}
+	return "", false
 }
 
 type gitlabProject struct {

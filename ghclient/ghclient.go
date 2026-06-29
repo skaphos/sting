@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"strings"
 	"time"
@@ -30,6 +31,45 @@ func apiError(op string, err error) error {
 		return fmt.Errorf("%s: github secondary rate limit, retry later: %w", op, err)
 	}
 	return fmt.Errorf("%s: %w", op, err)
+}
+
+// skipRepoReason classifies a per-repo error hit while enumerating an org. It
+// returns a short reason and true when the failure is specific to one
+// repository, so an org scan can skip it and keep going rather than aborting on
+// a single bad repo. The org's repo list was already fetched successfully (that
+// is what required org access), so a failure now listing one repo's commits is
+// a per-repo condition — an empty repo (409), a repo gone or not visible to the
+// token (404/410), one whose access is denied (403), or one withheld for legal
+// reasons (451). Global failures — rate limits, server errors, auth, context
+// cancellation, network errors — return false so the caller still aborts
+// instead of silently dropping every repo behind a transient or systemic fault.
+func skipRepoReason(err error) (string, bool) {
+	// Rate limits are global, not per-repo: skipping past them would just keep
+	// tripping the same limit on every remaining repo, so let the caller abort.
+	var rl *github.RateLimitError
+	if errors.As(err, &rl) {
+		return "", false
+	}
+	var ab *github.AbuseRateLimitError
+	if errors.As(err, &ab) {
+		return "", false
+	}
+	var er *github.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		switch er.Response.StatusCode {
+		case http.StatusConflict: // 409: "Git Repository is empty"
+			return "empty repository", true
+		case http.StatusNotFound: // 404: deleted in flight or not visible to the token
+			return "not found", true
+		case http.StatusGone: // 410: removed
+			return "gone", true
+		case http.StatusForbidden: // 403: access denied to this repo (rate limits handled above)
+			return "access forbidden", true
+		case http.StatusUnavailableForLegalReasons: // 451: withheld (e.g. DMCA)
+			return "unavailable for legal reasons", true
+		}
+	}
+	return "", false
 }
 
 // Client retrieves commits from GitHub for an author over a time window.
@@ -73,6 +113,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 
 	var (
 		commits []model.Commit
+		skipped []model.SkippedRepo
 		err     error
 	)
 	switch q.Scope {
@@ -81,7 +122,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	case model.ScopeRepos:
 		commits, err = c.listRepos(ctx, q)
 	case model.ScopeOrg:
-		commits, err = c.listOrg(ctx, q)
+		commits, skipped, err = c.listOrg(ctx, q)
 	default:
 		return model.Result{}, fmt.Errorf("unsupported scope %q", q.Scope)
 	}
@@ -108,6 +149,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		Count:         len(commits),
 		Commits:       commits,
 		Truncated:     truncated,
+		Skipped:       skipped,
 	}, nil
 }
 
@@ -175,16 +217,24 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 	return out, nil
 }
 
-// listOrg enumerates an org's repositories and lists commits in each.
-func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, error) {
+// listOrg enumerates an org's repositories and lists commits in each. A failure
+// listing one repo's commits does not abort the whole scan when it is a
+// per-repo condition (e.g. an empty repo, or one the token cannot read): that
+// repo is recorded in the returned skip list and enumeration continues. Global
+// failures (rate limits, auth, server errors) still abort, since continuing
+// would only retrip them on every remaining repo. See skipRepoReason.
+func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, []model.SkippedRepo, error) {
 	if q.Org == "" {
-		return nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
+		return nil, nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
 	}
 	repos, err := c.orgRepos(ctx, q.Org)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []model.Commit
+	var (
+		out     []model.Commit
+		skipped []model.SkippedRepo
+	)
 	for _, full := range repos {
 		owner, repo, ok := splitRepo(full)
 		if !ok {
@@ -192,14 +242,18 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, er
 		}
 		commits, err := c.collectRepo(ctx, owner, repo, q)
 		if err != nil {
-			return nil, err
+			if reason, skip := skipRepoReason(err); skip {
+				skipped = append(skipped, model.SkippedRepo{Repo: full, Reason: reason})
+				continue
+			}
+			return nil, nil, err
 		}
 		out = append(out, commits...)
 		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 			break
 		}
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // collectRepo gathers a repo's default-branch commits and, when the query opts

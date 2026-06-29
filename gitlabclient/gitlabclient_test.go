@@ -195,6 +195,100 @@ func TestCollectScopeOrg(t *testing.T) {
 	}
 }
 
+// TestCollectScopeOrgSkipsBadProject verifies a group scan records a per-project
+// failure (here a 404) in Result.Skipped and continues to the healthy project
+// instead of aborting the whole scan.
+func TestCollectScopeOrgSkipsBadProject(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch path := r.URL.EscapedPath(); {
+		case strings.Contains(path, "/groups/skaphos/projects"):
+			_, _ = w.Write([]byte(`[{"id":42,"path_with_namespace":"skaphos/sting"},{"id":99,"path_with_namespace":"skaphos/gone"}]`))
+		case strings.Contains(path, "/projects/42/repository/commits"):
+			_, _ = w.Write([]byte(gitlabCommitsBody))
+		case strings.Contains(path, "/projects/99/repository/commits"):
+			http.Error(w, `{"message":"404 Project Not Found"}`, http.StatusNotFound)
+		default:
+			t.Errorf("unexpected path %q", path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat",
+		Scope:  model.ScopeOrg,
+		Org:    "skaphos",
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v (group scan must not abort on one bad project)", err)
+	}
+	if res.Count != 1 {
+		t.Fatalf("Count = %d, want 1 (healthy project only)", res.Count)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want exactly one entry", res.Skipped)
+	}
+	if res.Skipped[0].Repo != "skaphos/gone" || res.Skipped[0].Reason != "not found" {
+		t.Errorf("Skipped[0] = %+v, want {skaphos/gone not found}", res.Skipped[0])
+	}
+}
+
+// TestCollectScopeOrgAbortsOnFatal verifies a global failure (429) still aborts
+// the group scan; only per-project conditions are skippable.
+func TestCollectScopeOrgAbortsOnFatal(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch path := r.URL.EscapedPath(); {
+		case strings.Contains(path, "/groups/skaphos/projects"):
+			_, _ = w.Write([]byte(`[{"id":42,"path_with_namespace":"skaphos/sting"}]`))
+		case strings.Contains(path, "/projects/42/repository/commits"):
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+		default:
+			t.Errorf("unexpected path %q", path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	if _, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat",
+		Scope:  model.ScopeOrg,
+		Org:    "skaphos",
+	}); err == nil {
+		t.Fatal("Collect: want error on 429; global failures must not be skipped")
+	}
+}
+
+func TestSkipProjectReason(t *testing.T) {
+	status := func(code int) error {
+		return &statusError{op: "op", status: code, msg: "x"}
+	}
+	cases := []struct {
+		name   string
+		err    error
+		reason string
+		skip   bool
+	}{
+		{"not found 404", status(http.StatusNotFound), "not found", true},
+		{"forbidden 403", status(http.StatusForbidden), "access forbidden", true},
+		{"empty 409", status(http.StatusConflict), "empty repository", true},
+		{"rate limit 429 fatal", status(http.StatusTooManyRequests), "", false},
+		{"server 500 fatal", status(http.StatusInternalServerError), "", false},
+		{"non-status error fatal", context.Canceled, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, skip := skipProjectReason(tc.err)
+			if skip != tc.skip || reason != tc.reason {
+				t.Errorf("skipProjectReason = (%q, %v), want (%q, %v)", reason, skip, tc.reason, tc.skip)
+			}
+		})
+	}
+}
+
 func TestCollectPaginationAndMaxCommits(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

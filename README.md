@@ -204,6 +204,18 @@ GitLab `search` scope is not supported yet. GitLab's search API does not map
 cleanly to sting's date-bounded author query contract, so use `repos` or `org`
 with `--provider gitlab`.
 
+In `org` scope sting enumerates the org's repos and then lists each repo's
+commits. A repo that cannot be listed for a reason specific to that repo — an
+empty repository (GitHub returns `409`), or one that is gone or not visible to
+the token (`403`/`404`/`410`/`451`) — is **skipped** rather than aborting the
+whole scan, so one bad repo can no longer sink an entire org query. Skipped
+repos are reported in the result: a `skipped` array in JSON (each entry has a
+`repo` and a `reason`) and a **Skipped** line in Markdown. Global failures
+(rate limits, auth, server errors) still abort, since continuing would only
+retrip them on every remaining repo. The GitLab `org` scope skips unreadable
+projects the same way. The explicit `repos` scope does **not** skip: a repo you
+named yourself fails loudly so a typo or access gap is not silently dropped.
+
 #### Searching private orgs
 
 A bare `search` is a global author query, which GitHub limits to **public**

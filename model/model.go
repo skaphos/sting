@@ -156,4 +156,17 @@ type Result struct {
 	Count         int       `json:"count"`
 	Commits       []Commit  `json:"commits"`
 	Truncated     bool      `json:"truncated,omitempty"` // true if MaxCommits clipped results
+	// Skipped lists repositories an org-scope scan could not list and skipped so
+	// that one bad repo (e.g. an empty repo, or one the token cannot read) does
+	// not abort the whole scan. Empty/omitted when nothing was skipped.
+	Skipped []SkippedRepo `json:"skipped,omitempty"`
+}
+
+// SkippedRepo records a repository that an org-scope scan could not list and
+// chose to skip rather than abort the whole scan. Reason is a short,
+// human-readable cause (e.g. "empty repository", "not found"). Surfacing skips
+// keeps a partial result auditable instead of silently dropping the repo.
+type SkippedRepo struct {
+	Repo   string `json:"repo"`
+	Reason string `json:"reason"`
 }
