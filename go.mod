@@ -10,7 +10,7 @@ require (
 	github.com/cli/oauth v1.2.2
 	github.com/google/go-github/v82 v82.0.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/pelletier/go-toml/v2 v2.4.0
+	github.com/pelletier/go-toml/v2 v2.4.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/zalando/go-keyring v0.2.8
