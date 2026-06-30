@@ -4,6 +4,13 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5](https://github.com/skaphos/sting/compare/v0.0.4...v0.0.5) (2026-06-30)
+
+
+### Bug Fixes
+
+* skip unreadable repos in org scope instead of aborting the scan ([#23](https://github.com/skaphos/sting/issues/23)) ([e2d1654](https://github.com/skaphos/sting/commit/e2d165436f0354baa8e65fda97532e7344e2dd33))
+
 ## [0.0.4](https://github.com/skaphos/sting/compare/v0.0.3...v0.0.4) (2026-06-22)
 
 
