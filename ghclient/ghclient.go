@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-github/v82/github"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
+	"golang.org/x/sync/errgroup"
 )
 
 // httpTimeout bounds each HTTP request the client makes so a hung connection
@@ -26,6 +27,14 @@ const httpTimeout = 30 * time.Second
 // another page cannot spin forever with unbounded memory. It is far above any
 // realistic page count for a single query.
 const maxPages = 10000
+
+// defaultConcurrency bounds how many per-commit detail requests (GetCommit) run
+// at once when enriching a result with stats/files/diffs. GitHub has no batch
+// endpoint for commit detail, so a large author history otherwise costs one
+// serial round-trip per commit; fanning these out is the dominant speed-up for
+// "all my commits over a window" queries. The limit stays well under GitHub's
+// concurrent-request ceiling so it does not itself provoke secondary rate limits.
+const defaultConcurrency = 8
 
 // apiError wraps a go-github error, giving rate-limit failures a clearer,
 // agent-actionable message (an MCP client can decide to back off) while
@@ -110,8 +119,9 @@ func isRateLimited(er *github.ErrorResponse) bool {
 
 // Client retrieves commits from GitHub for an author over a time window.
 type Client struct {
-	gh      *github.Client
-	perPage int
+	gh          *github.Client
+	perPage     int
+	concurrency int
 }
 
 // New builds a Client. token may be empty (unauthenticated, heavily rate
@@ -140,7 +150,7 @@ func New(token, baseURL string, perPage int) (*Client, error) {
 	if perPage > 100 {
 		perPage = 100
 	}
-	return &Client{gh: gh, perPage: perPage}, nil
+	return &Client{gh: gh, perPage: perPage, concurrency: defaultConcurrency}, nil
 }
 
 // Collect runs a query using its scope and returns the normalized result.
@@ -185,6 +195,16 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		truncated = true
 	}
 
+	// Enrich only the commits that survive the cap, and do it concurrently. The
+	// scope helpers above return commit metadata without per-commit detail; here
+	// each surviving commit gets its stats/files/diffs in a bounded fan-out. This
+	// runs after the clip so the extra truncation-probe commit is never fetched.
+	if needsDetail(q) {
+		if err := c.enrichDetails(ctx, commits, q); err != nil {
+			return model.Result{}, err
+		}
+	}
+
 	return model.Result{
 		SchemaVersion: model.SchemaVersion,
 		GeneratedAt:   time.Now(),
@@ -218,17 +238,7 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 			return nil, apiError("search commits", err)
 		}
 		for _, cr := range res.Commits {
-			cm := fromSearchResult(cr)
-			if needsDetail(q) {
-				owner, repo, ok := splitRepo(cm.Repo)
-				if !ok {
-					return nil, fmt.Errorf("invalid repo %q from search result", cm.Repo)
-				}
-				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
-					return nil, err
-				}
-			}
-			out = append(out, cm)
+			out = append(out, fromSearchResult(cr))
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				break
 			}
@@ -366,11 +376,6 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 				continue
 			}
 			seen[cm.SHA] = true
-			if needsDetail(q) {
-				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
-					return nil, err
-				}
-			}
 			out = append(out, cm)
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, nil
@@ -446,11 +451,6 @@ func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number
 				continue
 			}
 			seen[cm.SHA] = true
-			if needsDetail(q) {
-				if err := c.fillDetails(ctx, owner, repo, &cm, q); err != nil {
-					return nil, err
-				}
-			}
 			out = append(out, cm)
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, nil
@@ -530,6 +530,27 @@ func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
 
 func needsDetail(q model.Query) bool {
 	return q.IncludeStats || q.IncludeFiles || q.IncludeDiffs
+}
+
+// enrichDetails fills each commit's stats/files/diffs concurrently, bounded by
+// c.concurrency. Each worker writes only its own slice element, so the result
+// order is unchanged. The first failure cancels the shared context and aborts
+// the whole scan, matching the prior sequential behavior — a rate limit or auth
+// error is fatal, not something to skip per commit.
+func (c *Client) enrichDetails(ctx context.Context, commits []model.Commit, q model.Query) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(c.concurrency)
+	for i := range commits {
+		cm := &commits[i]
+		g.Go(func() error {
+			owner, repo, ok := splitRepo(cm.Repo)
+			if !ok {
+				return fmt.Errorf("invalid repo %q", cm.Repo)
+			}
+			return c.fillDetails(ctx, owner, repo, cm, q)
+		})
+	}
+	return g.Wait()
 }
 
 func (c *Client) fillDetails(ctx context.Context, owner, repo string, cm *model.Commit, q model.Query) error {
