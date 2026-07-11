@@ -84,7 +84,12 @@ PRs should include:
 Releases are cut by Release Please and published by `goreleaser` on the
 resulting tag (binaries, checksums, SBOM, cosign signatures, provenance
 attestations, and a Homebrew cask). Release Please owns the release PR,
-`CHANGELOG.md`, tag, and GitHub release notes; GoReleaser attaches artifacts to
-that release. Release automation requires the `RELEASE_BOT_APP_ID` variable and
+`CHANGELOG.md`, and tag; GoReleaser owns the published GitHub release object
+and its release notes (`release-please.yml` passes `skip-github-release: true`,
+and `.goreleaser.yaml` runs with `changelog.use: github` and
+`release.draft: false`) — see [ADR 0009](docs/adr/0009-goreleaser-owns-the-github-release.md),
+which supersedes the release-notes-ownership part of
+[ADR 0005](docs/adr/0005-release-please-owns-release-notes.md). Release
+automation requires the `RELEASE_BOT_CLIENT_ID` variable and
 `RELEASE_BOT_PRIVATE_KEY` secret to be provisioned, with the app granted access
 to this repository and `skaphos/homebrew-tools`.

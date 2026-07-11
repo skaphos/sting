@@ -22,8 +22,8 @@ Public packages (importable; the evidence contract — see
 Application layer (internal):
 
 - `cmd/sting/`: thin entrypoint that boots `internal/cli`.
-- `internal/cli/`: Cobra command tree (`query`, `mcp`, `install`, `uninstall`,
-  `version`) and viper wiring.
+- `internal/cli/`: Cobra command tree (`query`, `auth`, `init`, `mcp`, `install`,
+  `uninstall`, `version`) and viper wiring.
 - `internal/commitclient/`: provider client selection shared by CLI and MCP.
 - `internal/mcpserver/`: MCP server; the read-only `get_commits` tool.
 - `internal/mcpinstall/`: per-runtime install adapters (Claude, Codex, OpenCode,
@@ -58,8 +58,11 @@ Tasks run without globally installing tools (Task is pinned in `tools/`):
 
 - Framework: the standard library `testing` package; table-driven tests where natural.
 - New behavior must ship with direct test coverage in the same change.
-- CI enforces a strict 80% per-package coverage gate (`scripts/check-coverage.sh`);
-  run `go -C tools tool task test-cover-check` locally before pushing.
+- CI enforces a per-package coverage gate, 80% by default, with documented lower
+  floors for a few packages with heavy interactive/external-integration surface
+  (`internal/cli` 60%, `internal/credentials` 72%; see
+  `scripts/check-coverage.sh`); run `go -C tools tool task test-cover-check`
+  locally before pushing.
 - No network in tests: use `net/http/httptest` for GitHub calls and isolate
   `HOME`/`USERPROFILE` for filesystem-touching tests.
 
@@ -93,8 +96,10 @@ Tasks run without globally installing tools (Task is pinned in `tools/`):
   `ci/…`, `refactor/…`. One logical change per PR.
 - **Commits must be cryptographically signed AND carry a DCO sign-off** (pass
   both `-S` and `-s`, e.g. `git commit -S -s …`).
-- Use Conventional Commits so `skaphos/actions/release-pr` can infer the bump
-  via `svu`:
+- Use Conventional Commits so `googleapis/release-please-action` (the release
+  gate; see [ADR 0005](docs/adr/0005-release-please-owns-release-notes.md)) can
+  infer the version bump. `svu` (`task version-next`) survives only as a local
+  convenience task for previewing the next version; it does not gate releases:
   - `feat:` → minor; `fix:` / `perf:` → patch.
   - `docs:`, `test:`, `ci:`, `chore:`, `refactor:` → no bump by default.
   - `!` in type/scope or a `BREAKING CHANGE:` footer → major.

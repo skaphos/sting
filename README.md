@@ -33,7 +33,7 @@ go install github.com/skaphos/sting/cmd/sting@latest
 Or build from this repo:
 
 ```sh
-go -C tools tool task build      # -> ./bin/sting
+go -C tools tool task build      # -> ./sting
 ```
 
 ## Getting started
@@ -89,7 +89,11 @@ sting auth logout gitlab --hostname gitlab.example.com
 ### Legacy PAT fallback
 
 Personal Access Tokens are still fully supported as a fallback (especially useful
-in CI or air-gapped environments):
+in CI or air-gapped environments). Note that a configured PAT (`token`/`gitlab_token`
+in the config file, or `STING_TOKEN`/`STING_GITLAB_TOKEN` in the environment)
+**overrides** any stored OAuth credential for that provider/host — it does not
+merely fill a gap when OAuth is absent. Unset it if you want sting to use the
+OAuth credential instead.
 
 ```sh
 # config file
@@ -286,8 +290,8 @@ default for a single invocation. See `config.example.yaml`.
 ## Development
 
 ```sh
-task check        # tidy + vet + test
-task test:race    # tests under the race detector
+task tidy vet test # tidy + vet + test
+task test-race     # tests under the race detector
 task run -- --author octocat --scope repos --repos octocat/Hello-World --since 2008-01-01
 ```
 
