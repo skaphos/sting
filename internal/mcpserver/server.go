@@ -5,6 +5,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,6 +17,11 @@ import (
 
 // GetCommitsInput is the argument schema for the get_commits tool. The
 // jsonschema descriptions are surfaced to the calling agent.
+//
+// The Include* flags are *bool (rather than bool) so that an explicit
+// "false" from the client is distinguishable from an omitted field: with a
+// plain bool, both encode as the zero value and a client could never turn
+// off a flag the server config enables by default.
 type GetCommitsInput struct {
 	Provider     string   `json:"provider,omitempty" jsonschema:"source control provider: github (default) or gitlab"`
 	Author       string   `json:"author" jsonschema:"provider username or author string whose commits to retrieve"`
@@ -25,11 +31,11 @@ type GetCommitsInput struct {
 	Scope        string   `json:"scope,omitempty" jsonschema:"discovery scope: search (author search; global/public-only unless scoped by org or repos), repos (explicit repo list), or org (enumerate an org's repos; most complete for private orgs)"`
 	Repos        []string `json:"repos,omitempty" jsonschema:"repository/project targets; required for scope=repos, and narrows GitHub scope=search to those repos (incl. private with access)"`
 	Org          string   `json:"org,omitempty" jsonschema:"organization or GitLab group; required for scope=org, and scopes GitHub scope=search into that org (reaches private repos the token can access)"`
-	IncludeStats bool     `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions; GitHub uses extra API calls, GitLab uses commit-list stats"`
-	IncludeFiles bool     `json:"include_files,omitempty" jsonschema:"fetch per-file change summaries; uses extra commit-detail API calls"`
-	IncludeDiffs bool     `json:"include_diffs,omitempty" jsonschema:"fetch bounded patch text for changed files; implies include_files and can be token-heavy"`
+	IncludeStats *bool    `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions; GitHub uses extra API calls, GitLab uses commit-list stats"`
+	IncludeFiles *bool    `json:"include_files,omitempty" jsonschema:"fetch per-file change summaries; uses extra commit-detail API calls"`
+	IncludeDiffs *bool    `json:"include_diffs,omitempty" jsonschema:"fetch bounded patch text for changed files; implies include_files and can be token-heavy"`
 	MaxDiffBytes int      `json:"max_diff_bytes,omitempty" jsonschema:"per-commit patch byte cap when include_diffs is true; defaults to server config"`
-	IncludePRs   bool     `json:"include_prs,omitempty" jsonschema:"also discover commits on open pull-request branches (scope=repos or org, GitHub only); finds unmerged work that commit search and branch listing miss, at the cost of extra API calls"`
+	IncludePRs   *bool    `json:"include_prs,omitempty" jsonschema:"also discover commits on open pull-request branches (scope=repos or org, GitHub only); finds unmerged work that commit search and branch listing miss, at the cost of extra API calls"`
 }
 
 // handler holds the dependencies shared across tool calls.
@@ -72,7 +78,39 @@ func ReadOnlyTools() []string {
 
 func boolPtr(b bool) *bool { return &b }
 
-func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in GetCommitsInput) (*mcp.CallToolResult, model.Result, error) {
+// collectCommits resolves a client for q.Provider and collects the matching
+// commits. It is a package variable (rather than a direct call inline in
+// getCommits) so tests can substitute a panic-inducing implementation to
+// exercise the getCommits panic-recovery path without depending on a real
+// provider client.
+var collectCommits = func(ctx context.Context, cfg config.Config, q model.Query) (model.Result, error) {
+	client, err := commitclient.New(cfg, q.Provider)
+	if err != nil {
+		return model.Result{}, err
+	}
+	return client.Collect(ctx, q)
+}
+
+// getCommits is dispatched by the go-sdk in its own goroutine with no panic
+// recovery of its own, so an unrecovered panic anywhere in the
+// Resolve->commitclient->client->render chain would crash the whole
+// long-lived stdio server. The deferred recover below converts such a panic
+// into a tool-level error result instead.
+//
+// On the ordinary (non-panic) error paths, the real error is returned as the
+// handler's error value rather than folded into a success result: the go-sdk
+// only marshals the structured Out value when the handler's error is nil, so
+// returning the error here means a failure never emits a schema-shaped,
+// zero-commit structured payload alongside the IsError text.
+func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in GetCommitsInput) (res *mcp.CallToolResult, out model.Result, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = errorResult(fmt.Errorf("get_commits: internal error: %v", r))
+			out = model.Result{}
+			err = nil
+		}
+	}()
+
 	req := config.Request{
 		Provider: in.Provider,
 		Author:   in.Author,
@@ -83,35 +121,30 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 		Repos:    in.Repos,
 		Org:      in.Org,
 	}
-	if in.IncludeStats {
-		req.IncludeStats = &in.IncludeStats
+	if in.IncludeStats != nil {
+		req.IncludeStats = in.IncludeStats
 	}
-	if in.IncludeFiles {
-		req.IncludeFiles = &in.IncludeFiles
+	if in.IncludeFiles != nil {
+		req.IncludeFiles = in.IncludeFiles
 	}
-	if in.IncludeDiffs {
-		req.IncludeDiffs = &in.IncludeDiffs
+	if in.IncludeDiffs != nil {
+		req.IncludeDiffs = in.IncludeDiffs
 	}
 	if in.MaxDiffBytes != 0 {
 		req.MaxDiffBytes = &in.MaxDiffBytes
 	}
-	if in.IncludePRs {
-		req.IncludePullRequests = &in.IncludePRs
+	if in.IncludePRs != nil {
+		req.IncludePullRequests = in.IncludePRs
 	}
 
-	q, err := h.cfg.Resolve(req, time.Now())
-	if err != nil {
-		return errorResult(err), model.Result{}, nil
+	q, rerr := h.cfg.Resolve(req, time.Now())
+	if rerr != nil {
+		return nil, model.Result{}, rerr
 	}
 
-	client, err := commitclient.New(h.cfg, q.Provider)
-	if err != nil {
-		return errorResult(err), model.Result{}, nil
-	}
-
-	result, err := client.Collect(ctx, q)
-	if err != nil {
-		return errorResult(err), model.Result{}, nil
+	result, colErr := collectCommits(ctx, h.cfg, q)
+	if colErr != nil {
+		return nil, model.Result{}, colErr
 	}
 
 	md := render.Markdown(result)

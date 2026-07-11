@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/skaphos/sting/internal/credentials"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var initCmd = &cobra.Command{
@@ -218,26 +220,130 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 	return offerInstall(cmd, out, in)
 }
 
-// ensureDefaultProvider sets the provider in viper and reliably writes it
-// to ~/.config/sting/config.yaml (creating directories and file as needed).
+// ensureDefaultProvider sets the provider in viper (for the rest of this
+// process) and persists it to ~/.config/sting/config.yaml (creating
+// directories and file as needed).
+//
+// It deliberately does NOT use viper's WriteConfig: WriteConfig serializes
+// viper's entire merged state (defaults + env + bound flags), which would
+// write any token/gitlab_token sourced from STING_TOKEN/STING_GITLAB_TOKEN
+// to disk in cleartext, and would rewrite the whole file, destroying any
+// comments or formatting the user had. Instead this does a targeted
+// read-modify-write of just the affected keys via setConfigKeys, so the rest
+// of the file (including secrets that must never be written here) is left
+// untouched.
 func ensureDefaultProvider(provider string) {
 	v.Set("provider", provider)
 
-	// Best effort: ensure we have a config file we can write to
 	dirs := configSearchDirs()
-	if len(dirs) > 0 {
-		dir := dirs[0]
-		_ = os.MkdirAll(dir, 0700)
-		configPath := filepath.Join(dir, "config.yaml")
-		v.SetConfigFile(configPath)
+	if len(dirs) == 0 {
+		return
+	}
+	dir := dirs[0]
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "sting: warning: could not create config directory %s: %v\n", dir, err)
+		return
+	}
+	configPath := filepath.Join(dir, "config.yaml")
 
-		// If the file doesn't exist, create a minimal one so WriteConfig succeeds
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			_ = os.WriteFile(configPath, []byte("# Sting configuration\n"), 0600)
+	keys := map[string]string{"provider": provider}
+	if provider == "gitlab" {
+		// GitLab doesn't support the built-in default_scope of "search" (see
+		// config.Config.Validate): every bare query would otherwise fail
+		// validation. Pin a scope GitLab does support so the config sting
+		// just wrote is actually usable.
+		keys["default_scope"] = "repos"
+		v.Set("default_scope", "repos")
+	}
+
+	if err := setConfigKeys(configPath, keys); err != nil {
+		// Do not swallow this: the user's default-provider choice silently
+		// failing to persist is worth surfacing, even though init otherwise
+		// tolerates failures gracefully.
+		fmt.Fprintf(os.Stderr, "sting: warning: could not persist config to %s: %v\n", configPath, err)
+		return
+	}
+
+	v.SetConfigFile(configPath)
+}
+
+// setConfigKeys does a targeted read-modify-write of the given top-level
+// string keys in the YAML file at path, leaving every other key, comment,
+// and formatting choice untouched. It creates the file (and a minimal
+// top-level mapping) if it does not yet exist.
+//
+// Callers must never pass secret keys (token, gitlab_token, ...) here: the
+// whole point is to avoid ever writing sting's config file from viper's
+// merged state, which is how env-sourced tokens leak into it.
+func setConfigKeys(path string, keys map[string]string) error {
+	var doc yaml.Node
+	isNew := true
+
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if len(bytes.TrimSpace(data)) > 0 {
+			if uerr := yaml.Unmarshal(data, &doc); uerr != nil {
+				return fmt.Errorf("parse %s: %w", path, uerr)
+			}
+			isNew = false
+		}
+	case os.IsNotExist(err):
+		// Fall through: build a fresh document below.
+	default:
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+
+	if doc.Kind == 0 {
+		doc = yaml.Node{Kind: yaml.DocumentNode}
+	}
+
+	var mapping *yaml.Node
+	if len(doc.Content) == 0 {
+		mapping = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		if isNew {
+			mapping.HeadComment = "Sting configuration"
+		}
+		doc.Content = []*yaml.Node{mapping}
+	} else {
+		mapping = doc.Content[0]
+		if mapping.Kind != yaml.MappingNode {
+			return fmt.Errorf("%s: top-level YAML value is not a mapping", path)
 		}
 	}
 
-	_ = v.WriteConfig()
+	for key, val := range keys {
+		setMappingString(mapping, key, val)
+	}
+
+	out, merr := yaml.Marshal(&doc)
+	if merr != nil {
+		return fmt.Errorf("encode %s: %w", path, merr)
+	}
+	if werr := os.WriteFile(path, out, 0600); werr != nil {
+		return fmt.Errorf("write %s: %w", path, werr)
+	}
+	return nil
+}
+
+// setMappingString sets key to val in a YAML mapping node, updating the
+// existing value node in place (preserving any comments attached to it) if
+// the key is already present, or appending a new key/value pair otherwise.
+func setMappingString(mapping *yaml.Node, key, val string) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			value := mapping.Content[i+1]
+			value.Kind = yaml.ScalarNode
+			value.Tag = "!!str"
+			value.Style = 0
+			value.Value = val
+			return
+		}
+	}
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: val},
+	)
 }
 
 // offerInstall asks the user if they want to register Sting with their agent runtimes.

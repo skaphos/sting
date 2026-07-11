@@ -59,7 +59,7 @@ func toJSON(r model.Result) (string, error) {
 
 func toMarkdown(r model.Result) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Commits by `%s`\n\n", r.Author)
+	fmt.Fprintf(&b, "# Commits by %s\n\n", codeSpan(r.Author))
 	fmt.Fprintf(&b, "- **Window:** %s → %s\n",
 		r.Since.UTC().Format("2006-01-02"), r.Until.UTC().Format("2006-01-02"))
 	fmt.Fprintf(&b, "- **Scope:** %s\n", r.Scope)
@@ -98,8 +98,8 @@ func toMarkdown(r model.Result) string {
 			if len(sha) > 7 {
 				sha = sha[:7]
 			}
-			fmt.Fprintf(&b, "- `%s` %s — %s",
-				sha, c.Date.UTC().Format("2006-01-02"), c.Summary())
+			fmt.Fprintf(&b, "- %s %s — %s",
+				codeSpan(sha), c.Date.UTC().Format("2006-01-02"), c.Summary())
 			// Flag commits discovered on an open PR branch: they are unmerged
 			// evidence, so the source matters for an auditor reading the report.
 			if strings.HasPrefix(c.Source, "pull/") {
@@ -134,7 +134,7 @@ func writeSkipped(b *strings.Builder, skipped []model.SkippedRepo) {
 	copy(sorted, skipped)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Repo < sorted[j].Repo })
 	for _, s := range sorted {
-		fmt.Fprintf(b, "  - `%s` — %s\n", s.Repo, s.Reason)
+		fmt.Fprintf(b, "  - %s — %s\n", codeSpan(s.Repo), s.Reason)
 	}
 }
 
@@ -143,7 +143,7 @@ func writeFileChange(b *strings.Builder, f model.File) {
 	if f.PreviousPath != "" {
 		path = f.PreviousPath + " -> " + f.Path
 	}
-	fmt.Fprintf(b, "  - `%s`", path)
+	fmt.Fprintf(b, "  - %s", codeSpan(path))
 	if f.Status != "" {
 		fmt.Fprintf(b, " %s", f.Status)
 	}
@@ -159,7 +159,16 @@ func writeFileChange(b *strings.Builder, f model.File) {
 	}
 	b.WriteString("\n")
 	if f.Patch != "" {
-		b.WriteString("\n    ```diff\n")
+		// The patch is untrusted commit content fed to an LLM agent as
+		// evidence, so it must not be able to break out of this fenced code
+		// block: a fence marker of exactly 3 backticks embedded in the patch
+		// (which, after indenting, would line up with our own fence) would
+		// otherwise close the block early and let the rest of the patch
+		// render as live Markdown. Use a fence longer than the longest
+		// backtick run actually present in the patch so no line inside it
+		// can ever match or exceed the fence length.
+		fence := codeFence(f.Patch)
+		fmt.Fprintf(b, "\n    %sdiff\n", fence)
 		indented := "    " + strings.ReplaceAll(f.Patch, "\n", "\n    ")
 		b.WriteString(indented)
 		if !strings.HasSuffix(f.Patch, "\n") {
@@ -168,6 +177,47 @@ func writeFileChange(b *strings.Builder, f model.File) {
 		if f.PatchTruncated {
 			b.WriteString("    # diff truncated\n")
 		}
-		b.WriteString("    ```\n")
+		fmt.Fprintf(b, "    %s\n", fence)
 	}
+}
+
+// codeSpan wraps s as a CommonMark inline code span, safe against s
+// containing backticks: the delimiter uses one more backtick than the
+// longest backtick run in s, and a padding space is added when s itself
+// starts or ends with a backtick so the delimiter can't fuse with it.
+func codeSpan(s string) string {
+	fence := strings.Repeat("`", longestBacktickRun(s)+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		return fence + " " + s + " " + fence
+	}
+	return fence + s + fence
+}
+
+// codeFence returns a fenced-code-block delimiter (backticks only, no
+// language tag) long enough that no run of backticks inside body can match
+// or exceed it, so body can never prematurely close the block it is about to
+// be wrapped in.
+func codeFence(body string) string {
+	n := longestBacktickRun(body) + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
+}
+
+// longestBacktickRun returns the length of the longest run of consecutive
+// backtick characters in s.
+func longestBacktickRun(s string) int {
+	longest, cur := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			cur++
+			if cur > longest {
+				longest = cur
+			}
+		} else {
+			cur = 0
+		}
+	}
+	return longest
 }

@@ -32,21 +32,21 @@ func newTestHandler(t *testing.T, srv *httptest.Server) *handler {
 	return &handler{cfg: cfg}
 }
 
-// TestGetCommitsResolveError covers the resolve-failure branch (and errorResult):
-// an empty Author fails config.Resolve, so getCommits returns an IsError result
-// with non-empty text and a zero model.Result, and no Go error.
+// TestGetCommitsResolveError covers the resolve-failure branch: an empty
+// Author fails config.Resolve, so getCommits returns the real error as its Go
+// error return (rather than folding it into a success result), a nil
+// CallToolResult, and a zero model.Result. Returning the real error lets the
+// go-sdk build the IsError result itself and means it never marshals a
+// schema-shaped, zero-commit structured payload alongside the failure.
 func TestGetCommitsResolveError(t *testing.T) {
 	h := &handler{cfg: config.Default()}
 
 	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{Author: ""})
-	if err != nil {
-		t.Fatalf("getCommits returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-	if res == nil || !res.IsError {
-		t.Fatalf("expected IsError result, got %+v", res)
-	}
-	if txt := firstText(res); txt == "" {
-		t.Fatal("expected non-empty error text")
+	if res != nil {
+		t.Fatalf("expected nil result on error, got %+v", res)
 	}
 	if !isZeroResult(mr) {
 		t.Errorf("expected zero model.Result, got %+v", mr)
@@ -154,7 +154,7 @@ func TestGetCommitsIncludePRs(t *testing.T) {
 		Repos:      []string{"skaphos/sting"},
 		Since:      "2026-05-01",
 		Until:      "2026-05-31",
-		IncludePRs: true,
+		IncludePRs: boolPtr(true),
 	})
 	if err != nil {
 		t.Fatalf("getCommits returned error: %v", err)
@@ -226,8 +226,8 @@ func TestGetCommitsGitLabSuccess(t *testing.T) {
 }
 
 // TestGetCommitsCollectError covers the collect-failure branch: the search
-// endpoint returns HTTP 500, so Collect errors and getCommits returns an
-// IsError result with a zero model.Result and no Go error.
+// endpoint returns HTTP 500, so Collect errors and getCommits returns the
+// real error as its Go error return, a nil result, and a zero model.Result.
 func TestGetCommitsCollectError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -240,17 +240,91 @@ func TestGetCommitsCollectError(t *testing.T) {
 		Author: "mfacenet",
 		Scope:  "search",
 	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if res != nil {
+		t.Fatalf("expected nil result on error, got %+v", res)
+	}
+	if !isZeroResult(mr) {
+		t.Errorf("expected zero model.Result, got %+v", mr)
+	}
+}
+
+// TestGetCommitsPanicRecovered covers the panic-recovery path: a dependency
+// (collectCommits) panicking must not crash the caller. getCommits recovers
+// and returns an IsError CallToolResult with no Go error, so a single
+// misbehaving request cannot take down the long-lived stdio server.
+func TestGetCommitsPanicRecovered(t *testing.T) {
+	orig := collectCommits
+	t.Cleanup(func() { collectCommits = orig })
+	collectCommits = func(context.Context, config.Config, model.Query) (model.Result, error) {
+		panic("simulated dependency panic")
+	}
+
+	h := &handler{cfg: config.Default()}
+
+	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author: "mfacenet",
+		Scope:  "search",
+	})
 	if err != nil {
 		t.Fatalf("getCommits returned error: %v", err)
 	}
 	if res == nil || !res.IsError {
 		t.Fatalf("expected IsError result, got %+v", res)
 	}
-	if firstText(res) == "" {
-		t.Fatal("expected non-empty error text")
+	txt := firstText(res)
+	if txt == "" || !strings.Contains(txt, "simulated dependency panic") {
+		t.Errorf("expected panic message in error text, got %q", txt)
 	}
 	if !isZeroResult(mr) {
 		t.Errorf("expected zero model.Result, got %+v", mr)
+	}
+}
+
+// TestGetCommitsExplicitFalseOverridesServerDefault covers the *bool input
+// fields: with a plain bool, an explicit "false" from the client would be
+// indistinguishable from an omitted field, so a server config with a flag
+// enabled by default could never be turned off. Using *bool and only
+// overriding when non-nil lets an explicit false through.
+func TestGetCommitsExplicitFalseOverridesServerDefault(t *testing.T) {
+	orig := collectCommits
+	t.Cleanup(func() { collectCommits = orig })
+
+	var gotQuery model.Query
+	collectCommits = func(_ context.Context, _ config.Config, q model.Query) (model.Result, error) {
+		gotQuery = q
+		return model.Result{Author: q.Author}, nil
+	}
+
+	cfg := config.Default()
+	cfg.IncludeStats = true // server default: on
+	h := &handler{cfg: cfg}
+
+	off := false
+	_, _, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author:       "mfacenet",
+		Scope:        "search",
+		IncludeStats: &off,
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if gotQuery.IncludeStats {
+		t.Error("explicit include_stats=false should override the server default of true")
+	}
+
+	// Omitted (nil) leaves the server default in effect.
+	_, _, err = h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author: "mfacenet",
+		Scope:  "search",
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if !gotQuery.IncludeStats {
+		t.Error("omitted include_stats should leave the server default of true in effect")
 	}
 }
 
