@@ -4,7 +4,7 @@ Thanks for contributing to sting.
 
 ## Development Setup
 
-- Go version: see `go.mod` (`go 1.26.3`).
+- Go version: see `go.mod` (`go 1.26.5`).
 - Run task targets without installing tools globally (Task is pinned in `tools/`):
   - `go -C tools tool task --list`
 

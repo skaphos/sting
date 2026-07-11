@@ -12,3 +12,9 @@ updates:
     directory: /tools
     schedule:
       interval: weekly
+  # Track GitHub Actions versions so workflow action bumps (checkout,
+  # setup-go, goreleaser, release-please, etc.) surface as PRs automatically.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
