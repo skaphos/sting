@@ -289,15 +289,28 @@ func TestSkipProjectReason(t *testing.T) {
 	}
 }
 
+// TestSkipProjectReasonRetryAfter verifies that an otherwise-skippable status
+// carrying a Retry-After header is treated as a global rate limit (fatal), so a
+// throttled response cannot masquerade as a per-project skip.
+func TestSkipProjectReasonRetryAfter(t *testing.T) {
+	err := &statusError{op: "op", status: http.StatusForbidden, msg: "slow down", retryAfter: "60"}
+	if reason, skip := skipProjectReason(err); skip || reason != "" {
+		t.Errorf("skipProjectReason(403 with Retry-After) = (%q, %v), want fatal", reason, skip)
+	}
+}
+
 func TestCollectPaginationAndMaxCommits(t *testing.T) {
+	// Three commits exist across two pages but MaxCommits=2, so one is dropped and
+	// Truncated must be true. The client fetches one past the cap (page 2's third
+	// commit) to confirm the drop.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
 		case "1":
 			w.Header().Set("X-Next-Page", "2")
-			_, _ = w.Write([]byte(`[{"id":"one","message":"m1","authored_date":"2026-05-21T11:00:00Z"}]`))
+			_, _ = w.Write([]byte(`[{"id":"one","message":"m1","authored_date":"2026-05-21T11:00:00Z"},{"id":"two","message":"m2","authored_date":"2026-05-22T11:00:00Z"}]`))
 		case "2":
-			_, _ = w.Write([]byte(`[{"id":"two","message":"m2","authored_date":"2026-05-22T11:00:00Z"}]`))
+			_, _ = w.Write([]byte(`[{"id":"three","message":"m3","authored_date":"2026-05-23T11:00:00Z"}]`))
 		default:
 			t.Errorf("unexpected page %q", r.URL.Query().Get("page"))
 		}
@@ -320,6 +333,35 @@ func TestCollectPaginationAndMaxCommits(t *testing.T) {
 	}
 	if res.Count != 2 {
 		t.Fatalf("Count = %d, want 2", res.Count)
+	}
+}
+
+// TestCollectExactMaxCommitsNotTruncated verifies the false-Truncated fix for
+// GitLab: exactly MaxCommits commits exist and none are dropped, so Truncated is
+// false even though the cap was reached.
+func TestCollectExactMaxCommitsNotTruncated(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"one","message":"m1","authored_date":"2026-05-21T11:00:00Z"},{"id":"two","message":"m2","authored_date":"2026-05-22T11:00:00Z"}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:     "octocat",
+		Scope:      model.ScopeRepos,
+		Repos:      []string{"skaphos/sting"},
+		MaxCommits: 2,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 2 {
+		t.Fatalf("Count = %d, want 2", res.Count)
+	}
+	if res.Truncated {
+		t.Error("Truncated = true, want false when exactly MaxCommits commits exist and none dropped")
 	}
 }
 

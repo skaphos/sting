@@ -371,10 +371,28 @@ func TestCollectScopeReposWithPullRequests(t *testing.T) {
 	}
 }
 
+// twoRepoCommitsBody is a two-commit default-branch listing for one repo.
+const twoRepoCommitsBody = `[
+  {
+    "sha": "def456",
+    "html_url": "https://example.com/c/def456",
+    "author": {"login": "octocat"},
+    "commit": {"message": "first", "author": {"name": "Octo Cat", "email": "octo@example.com", "date": "2026-05-21T11:00:00Z"}}
+  },
+  {
+    "sha": "def457",
+    "html_url": "https://example.com/c/def457",
+    "author": {"login": "octocat"},
+    "commit": {"message": "second", "author": {"name": "Octo Cat", "email": "octo@example.com", "date": "2026-05-20T11:00:00Z"}}
+  }
+]`
+
 // TestCollectReposPullRequestsRespectMaxCommits verifies that once the
-// default-branch listing fills MaxCommits for a repo, PR enumeration is skipped
-// entirely (no wasted API calls) rather than fetching commits the final clip
-// would discard.
+// default-branch listing already exceeds MaxCommits for a repo, PR enumeration
+// is skipped entirely (no wasted API calls) rather than fetching commits the
+// final clip would discard. The client fetches one commit past the cap to detect
+// truncation, so the default branch must return MaxCommits+1 commits to fill the
+// per-repo budget; here MaxCommits=1 with a two-commit default branch.
 func TestCollectReposPullRequestsRespectMaxCommits(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -382,7 +400,7 @@ func TestCollectReposPullRequestsRespectMaxCommits(t *testing.T) {
 		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/pulls"):
 			t.Errorf("PR enumeration should be skipped once MaxCommits is reached; got %q", r.URL.Path)
 		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
-			_, _ = w.Write([]byte(repoCommitsBody)) // one commit, def456
+			_, _ = w.Write([]byte(twoRepoCommitsBody))
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -404,8 +422,44 @@ func TestCollectReposPullRequestsRespectMaxCommits(t *testing.T) {
 	if res.Count != 1 || len(res.Commits) != 1 {
 		t.Fatalf("Count = %d, len = %d, want 1/1", res.Count, len(res.Commits))
 	}
+	if !res.Truncated {
+		t.Error("Truncated = false, want true when more commits than MaxCommits exist")
+	}
 	if res.Commits[0].SHA != "def456" {
 		t.Errorf("SHA = %q, want def456", res.Commits[0].SHA)
+	}
+}
+
+// TestCollectExactMaxCommitsNotTruncated verifies the false-Truncated fix: when
+// exactly MaxCommits commits exist and none are dropped, Truncated is false even
+// though the cap was reached. The client fetches one past the cap and, finding
+// nothing extra, leaves Truncated unset.
+func TestCollectExactMaxCommitsNotTruncated(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits") {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(twoRepoCommitsBody)) // exactly two commits, no next page
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:     "octocat",
+		Scope:      model.ScopeRepos,
+		Repos:      []string{"skaphos/sting"},
+		MaxCommits: 2,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 2 || len(res.Commits) != 2 {
+		t.Fatalf("Count = %d, len = %d, want 2/2", res.Count, len(res.Commits))
+	}
+	if res.Truncated {
+		t.Error("Truncated = true, want false when exactly MaxCommits commits exist and none dropped")
 	}
 }
 

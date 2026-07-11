@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 package patch
 
-import "testing"
+import (
+	"testing"
+	"unicode/utf8"
+)
 
 func TestConsumePatchBudget(t *testing.T) {
 	tests := []struct {
@@ -75,5 +78,46 @@ func TestConsumePatchBudget(t *testing.T) {
 				t.Errorf("remaining = %d, want %d", gotRem, tt.wantRem)
 			}
 		})
+	}
+}
+
+// TestConsumePatchBudgetUTF8Boundary verifies that truncation backs off to a
+// whole-rune boundary rather than splitting a multibyte character, so recorded
+// evidence is always valid UTF-8.
+func TestConsumePatchBudgetUTF8Boundary(t *testing.T) {
+	// "abc" + "é" (U+00E9, encoded as the two bytes 0xC3 0xA9), total length 5.
+	// A byte budget of 4 falls in the middle of "é".
+	const p = "abcé"
+	if len(p) != 5 {
+		t.Fatalf("test fixture len = %d, want 5", len(p))
+	}
+
+	got, trunc, rem := ConsumePatchBudget(p, 4)
+	if !trunc {
+		t.Fatal("truncated = false, want true")
+	}
+	if got != "abc" {
+		t.Errorf("patch = %q, want %q (backed off before the split rune)", got, "abc")
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("patch %q is not valid UTF-8", got)
+	}
+	if rem != 0 {
+		t.Errorf("remaining = %d, want 0", rem)
+	}
+
+	// A budget that lands exactly on a rune boundary keeps the whole rune.
+	got, trunc, _ = ConsumePatchBudget(p, 5-1+1) // 5 == full length
+	if trunc || got != p {
+		t.Errorf("full-length budget: got %q trunc=%v, want %q false", got, trunc, p)
+	}
+
+	// A budget smaller than the first rune yields an empty, still-valid result.
+	got, trunc, _ = ConsumePatchBudget("étail", 1)
+	if !trunc || got != "" {
+		t.Errorf("sub-rune budget: got %q trunc=%v, want empty true", got, trunc)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("patch %q is not valid UTF-8", got)
 	}
 }

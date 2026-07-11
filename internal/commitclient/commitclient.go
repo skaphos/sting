@@ -20,14 +20,12 @@ type Client interface {
 	Collect(context.Context, model.Query) (model.Result, error)
 }
 
-// New builds the provider client selected by provider using cfg.
+// New builds the provider client selected by provider using cfg. provider is
+// expected to be an already-resolved, non-empty value: config.Resolve applies
+// the empty->default->github fallback and rejects invalid providers, so New does
+// not repeat that defaulting. The switch's default branch is kept as a guard so
+// the exported constructor never returns a nil client for an unexpected value.
 func New(cfg config.Config, provider model.Provider) (Client, error) {
-	if provider == "" {
-		provider = cfg.DefaultProvider
-	}
-	if provider == "" {
-		provider = model.ProviderGitHub
-	}
 	switch provider {
 	case model.ProviderGitHub:
 		token := resolveGitHubToken(cfg)
