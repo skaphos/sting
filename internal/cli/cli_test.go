@@ -1013,6 +1013,7 @@ func TestRunAuthGitLab_WithToken(t *testing.T) {
 }
 
 func TestRunAuthLogout_Idempotent(t *testing.T) {
+	isolateHome(t) // hermetic: New() must not read a leaked real ~/.config/sting store
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	origHost := authLogoutHostname
@@ -1035,6 +1036,7 @@ func TestRunAuthLogout_Idempotent(t *testing.T) {
 }
 
 func TestRunAuthLogout_SpecificProvider(t *testing.T) {
+	isolateHome(t) // hermetic: New() must not read a leaked real ~/.config/sting store
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	origHost := authLogoutHostname
