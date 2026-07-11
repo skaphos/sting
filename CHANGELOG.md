@@ -4,6 +4,23 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6](https://github.com/skaphos/sting/compare/v0.0.5...v0.0.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **cli,server,config:** stop token leak, add MCP panic recovery, harden config ([#33](https://github.com/skaphos/sting/issues/33)) ([438d1d6](https://github.com/skaphos/sting/commit/438d1d6b377094224acfe3cf16638bf2d9e60a65))
+* **clients:** prevent query injection, rate-limit masking, and window drift ([#34](https://github.com/skaphos/sting/issues/34)) ([70a1035](https://github.com/skaphos/sting/commit/70a10354ed760adbdbc31de636ae3d52695f4dc2))
+* **credentials:** honor isolation contract and stop losing credentials ([#32](https://github.com/skaphos/sting/issues/32)) ([71c7c9a](https://github.com/skaphos/sting/commit/71c7c9a6e572825f78889fc09ea2407a3d6639b4))
+* **deps:** bump Go to 1.26.5 and refresh modules, tools, and CI actions ([#29](https://github.com/skaphos/sting/issues/29)) ([b484575](https://github.com/skaphos/sting/commit/b484575c1a016ea4af0917914f20cd448f48e64a))
+* **mcpinstall:** stop destroying user config on install/uninstall ([#35](https://github.com/skaphos/sting/issues/35)) ([4ae52a5](https://github.com/skaphos/sting/commit/4ae52a5eb5139a76b00a7d626a146d40a92a6177))
+* repair inert golangci-lint v2 config, dead coverage-skip branch, stale docs ([#31](https://github.com/skaphos/sting/issues/31)) ([5aa14a0](https://github.com/skaphos/sting/commit/5aa14a044893af7d9fd8abf7bedd3f27949aa94c))
+
+
+### Performance Improvements
+
+* **clients:** fetch per-commit detail concurrently ([#36](https://github.com/skaphos/sting/issues/36)) ([f392a6a](https://github.com/skaphos/sting/commit/f392a6a087d593999e6f82fdbf0a78797c4da7ee))
+
 ## [0.0.5](https://github.com/skaphos/sting/compare/v0.0.4...v0.0.5) (2026-06-30)
 
 
