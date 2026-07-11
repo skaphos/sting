@@ -2,6 +2,7 @@
 package mcpinstall
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,9 +92,23 @@ func (a *claudeAdapter) WriteEntry(path string, e Entry) error {
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	servers[serverKey] = claudeServer{Command: e.Command, Args: e.Args}
+	// Merge into any existing entry so user-added keys (env with a token, type,
+	// timeout, headers, ...) survive a command-path change on upgrade.
+	entry, _ := servers[serverKey].(map[string]any)
+	if entry == nil {
+		entry = map[string]any{}
+	}
+	entry["command"] = e.Command
+	if len(e.Args) > 0 {
+		entry["args"] = e.Args
+	} else {
+		delete(entry, "args")
+	}
+	servers[serverKey] = entry
 	doc["mcpServers"] = servers
-	return writeJSONDoc(path, doc, 0o644)
+	// Claude Code stores OAuth material in ~/.claude.json, so a file we create
+	// must be private (0600). WriteAtomic preserves the mode of an existing file.
+	return writeJSONDoc(path, doc, 0o600)
 }
 
 func (a *claudeAdapter) RemoveEntry(path string) (bool, error) {
@@ -113,7 +128,7 @@ func (a *claudeAdapter) RemoveEntry(path string) (bool, error) {
 	}
 	delete(servers, serverKey)
 	doc["mcpServers"] = servers
-	return true, writeJSONDoc(path, doc, 0o644)
+	return true, writeJSONDoc(path, doc, 0o600)
 }
 
 // --- shared JSON helpers (Claude + OpenCode) ---
@@ -131,8 +146,14 @@ func readJSONDoc(path string) (map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]any{}, nil
 	}
+	// Decode with UseNumber so integers round-trip losslessly. json.Unmarshal
+	// into map[string]any coerces every number to float64, which silently
+	// corrupts integers above 2^53 elsewhere in the file (this adapter rewrites
+	// the whole ~/.claude.json). json.Number marshals back verbatim.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("parse %q: %w", path, err)
 	}
 	if doc == nil {
@@ -159,7 +180,8 @@ func writeJSONDoc(path string, doc map[string]any, mode fs.FileMode) error {
 // present but not an object.
 func jsonObjectAt(doc map[string]any, key, path string) (map[string]any, error) {
 	raw, ok := doc[key]
-	if !ok {
+	if !ok || raw == nil {
+		// Absent, or explicitly null: treat as no object present.
 		return nil, nil
 	}
 	m, ok := raw.(map[string]any)

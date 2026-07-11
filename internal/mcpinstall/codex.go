@@ -75,40 +75,17 @@ func (a *codexAdapter) ReadEntry(path string) (Entry, bool, error) {
 }
 
 func (a *codexAdapter) WriteEntry(path string, e Entry) error {
-	doc, err := readTOMLDoc(path)
-	if err != nil {
-		return err
+	set := map[string]any{"command": e.Command}
+	if len(e.Args) > 0 {
+		set["args"] = e.Args
+	} else {
+		set["args"] = nil
 	}
-	servers, err := tomlTableAt(doc, "mcp_servers", path)
-	if err != nil {
-		return err
-	}
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	servers[serverKey] = codexServer{Command: e.Command, Args: e.Args}
-	doc["mcp_servers"] = servers
-	return writeTOMLDoc(path, doc, 0o644)
+	return upsertTOMLServer(path, set, 0o644)
 }
 
 func (a *codexAdapter) RemoveEntry(path string) (bool, error) {
-	doc, err := readTOMLDoc(path)
-	if err != nil {
-		return false, err
-	}
-	servers, err := tomlTableAt(doc, "mcp_servers", path)
-	if err != nil {
-		return false, err
-	}
-	if servers == nil {
-		return false, nil
-	}
-	if _, ok := servers[serverKey]; !ok {
-		return false, nil
-	}
-	delete(servers, serverKey)
-	doc["mcp_servers"] = servers
-	return true, writeTOMLDoc(path, doc, 0o644)
+	return deleteTOMLServer(path, 0o644)
 }
 
 // --- shared TOML helpers (Codex + Grok) ---
@@ -132,17 +109,6 @@ func readTOMLDoc(path string) (map[string]any, error) {
 		doc = map[string]any{}
 	}
 	return doc, nil
-}
-
-func writeTOMLDoc(path string, doc map[string]any, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	raw, err := toml.Marshal(doc)
-	if err != nil {
-		return err
-	}
-	return WriteAtomic(path, raw, mode)
 }
 
 func tomlTableAt(doc map[string]any, key, path string) (map[string]any, error) {

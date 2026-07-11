@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // WriteAtomic writes data to path via a temp-file-plus-rename so readers never
@@ -38,6 +39,13 @@ func WriteAtomic(path string, data []byte, mode fs.FileMode) error {
 		cleanup()
 		return fmt.Errorf("chmod temp: %w", err)
 	}
+	// Flush the temp file's contents to disk before the rename so a crash cannot
+	// leave a renamed-but-empty (or truncated) config behind.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sync temp: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
 		return fmt.Errorf("close temp: %w", err)
@@ -46,7 +54,29 @@ func WriteAtomic(path string, data []byte, mode fs.FileMode) error {
 		cleanup()
 		return fmt.Errorf("rename: %w", err)
 	}
+	// Persist the rename itself by fsyncing the parent directory, so the file is
+	// durably present under its final name after a crash.
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync dir: %w", err)
+	}
 	return nil
+}
+
+// syncDir fsyncs a directory so a prior rename into it is durable. It is a no-op
+// on platforms where opening or syncing a directory is unsupported (Windows).
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // resolveTarget returns the concrete write path (after symlink resolution), the
