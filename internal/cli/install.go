@@ -75,37 +75,50 @@ func runInstall(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Install into every selected runtime; a failure on one runtime is collected
+	// and reported but never aborts the others.
+	var errs []error
 	for _, r := range runtimes {
 		path, err := r.ConfigPath(scope)
 		if err != nil {
 			if errors.Is(err, mcpinstall.ErrScopeUnsupported) {
 				if explicit {
-					return fmt.Errorf("%s does not support --scope %s", r.Name(), scope)
+					errs = append(errs, fmt.Errorf("%s does not support --scope %s", r.Name(), scope))
 				}
 				continue
 			}
-			return err
+			errs = append(errs, fmt.Errorf("%s: %w", r.Name(), err))
+			continue
 		}
 		existing, present, err := r.ReadEntry(path)
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("%s: %w", r.Name(), err))
+			continue
+		}
+		// Respect a user who deliberately disabled the entry: reinstalling must
+		// not silently flip enabled back to true.
+		d := desired
+		if present && !existing.Enabled {
+			d.Enabled = false
 		}
 		switch {
 		case !present:
-			if err := r.WriteEntry(path, desired); err != nil {
-				return err
+			if err := r.WriteEntry(path, d); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", r.Name(), err))
+				continue
 			}
 			cmd.Printf("registered %s at %s\n", r.Name(), path)
-		case reflect.DeepEqual(existing, desired):
+		case reflect.DeepEqual(existing, d):
 			cmd.Printf("unchanged %s at %s\n", r.Name(), path)
 		default:
-			if err := r.WriteEntry(path, desired); err != nil {
-				return err
+			if err := r.WriteEntry(path, d); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", r.Name(), err))
+				continue
 			}
 			cmd.Printf("updated %s at %s\n", r.Name(), path)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func runtimeSelection(cmd *cobra.Command) mcpinstall.Selection {

@@ -2,7 +2,11 @@
 // Package mcpinstall registers and removes sting's MCP server entry in the
 // config files of agent runtimes (Claude Code, Codex, OpenCode, Grok). Each
 // runtime has an adapter translating the runtime-agnostic Entry into that
-// runtime's native config shape, with atomic, format-preserving writes.
+// runtime's native config shape. Writes are atomic (temp file + rename with
+// fsync) and preserve unrelated content: TOML files are edited surgically as
+// text so comments, ordering, and quoting survive; JSON files are merged
+// structurally so every other key (and any extra keys on sting's own entry) is
+// kept.
 package mcpinstall
 
 import (

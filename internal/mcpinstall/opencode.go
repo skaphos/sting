@@ -34,9 +34,9 @@ func opencodeDir() (string, error) {
 }
 
 func (a *opencodeAdapter) Detect() (bool, error) {
-	if os.Getenv("OPENCODE_CONFIG_DIR") != "" {
-		return true, nil
-	}
+	// Stat the resolved config dir rather than trusting that OPENCODE_CONFIG_DIR
+	// is set: a stale env var pointing at a nonexistent tree must not fabricate a
+	// detection.
 	dir, err := opencodeDir()
 	if err != nil {
 		return false, err
@@ -138,8 +138,17 @@ func (a *opencodeAdapter) WriteEntry(path string, e Entry) error {
 	if servers == nil {
 		servers = map[string]any{}
 	}
+	// Merge into any existing entry so user-added keys (environment, timeout,
+	// ...) survive a command-path change on upgrade.
+	entry, _ := servers[serverKey].(map[string]any)
+	if entry == nil {
+		entry = map[string]any{}
+	}
 	argv := append([]string{e.Command}, e.Args...)
-	servers[serverKey] = opencodeServer{Type: "local", Command: argv, Enabled: e.Enabled}
+	entry["type"] = "local"
+	entry["command"] = argv
+	entry["enabled"] = e.Enabled
+	servers[serverKey] = entry
 	doc["mcp"] = servers
 	return writeJSONDoc(path, doc, 0o644)
 }

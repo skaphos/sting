@@ -29,9 +29,9 @@ func grokDir() (string, error) {
 }
 
 func (a *grokAdapter) Detect() (bool, error) {
-	if os.Getenv("GROK_CONFIG_DIR") != "" {
-		return true, nil
-	}
+	// Stat the resolved config dir/file rather than trusting that
+	// GROK_CONFIG_DIR is set: a stale env var pointing at a nonexistent tree
+	// must not fabricate a detection.
 	dir, err := grokDir()
 	if err != nil {
 		return false, err
@@ -66,12 +66,13 @@ func (a *grokAdapter) ConfigPath(scope Scope) (string, error) {
 }
 
 // grokServer is the typed TOML shape of a Grok mcp_servers entry. Grok requires
-// an explicit enabled boolean.
+// an explicit enabled boolean. Any extra keys a user adds (env with a token,
+// timeout, ...) are not modeled here on purpose: WriteEntry merges into the raw
+// table so they are preserved rather than round-tripped through this struct.
 type grokServer struct {
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args,omitempty"`
-	Enabled bool              `toml:"enabled"`
-	Env     map[string]string `toml:"env,omitempty"`
+	Command string   `toml:"command"`
+	Args    []string `toml:"args,omitempty"`
+	Enabled bool     `toml:"enabled"`
 }
 
 func (a *grokAdapter) ReadEntry(path string) (Entry, bool, error) {
@@ -94,42 +95,19 @@ func (a *grokAdapter) ReadEntry(path string) (Entry, bool, error) {
 	if err := decodeTOMLInto(raw, &srv, path, "mcp_servers."+serverKey); err != nil {
 		return Entry{}, false, err
 	}
-	return Entry{Command: srv.Command, Args: srv.Args, Enabled: srv.Enabled}, true, nil
+	return Entry(srv), true, nil
 }
 
 func (a *grokAdapter) WriteEntry(path string, e Entry) error {
-	doc, err := readTOMLDoc(path)
-	if err != nil {
-		return err
+	set := map[string]any{"command": e.Command, "enabled": e.Enabled}
+	if len(e.Args) > 0 {
+		set["args"] = e.Args
+	} else {
+		set["args"] = nil
 	}
-	servers, err := tomlTableAt(doc, "mcp_servers", path)
-	if err != nil {
-		return err
-	}
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	servers[serverKey] = grokServer{Command: e.Command, Args: e.Args, Enabled: e.Enabled}
-	doc["mcp_servers"] = servers
-	return writeTOMLDoc(path, doc, 0o644)
+	return upsertTOMLServer(path, set, 0o644)
 }
 
 func (a *grokAdapter) RemoveEntry(path string) (bool, error) {
-	doc, err := readTOMLDoc(path)
-	if err != nil {
-		return false, err
-	}
-	servers, err := tomlTableAt(doc, "mcp_servers", path)
-	if err != nil {
-		return false, err
-	}
-	if servers == nil {
-		return false, nil
-	}
-	if _, ok := servers[serverKey]; !ok {
-		return false, nil
-	}
-	delete(servers, serverKey)
-	doc["mcp_servers"] = servers
-	return true, writeTOMLDoc(path, doc, 0o644)
+	return deleteTOMLServer(path, 0o644)
 }

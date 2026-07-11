@@ -37,7 +37,7 @@ func Snippet(runtime string, e Entry) (string, error) {
 	case "grok":
 		return renderTOML(map[string]any{
 			"mcp_servers": map[string]any{
-				serverKey: grokServer{Command: e.Command, Args: e.Args, Enabled: e.Enabled},
+				serverKey: grokServer(e),
 			},
 		})
 	default:

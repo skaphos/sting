@@ -69,16 +69,20 @@ func runUninstall(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Remove from every target; a failure on one config is collected and
+	// reported but never aborts removal from the others.
+	var errs []error
 	for _, t := range targets {
 		removed, err := t.runtime.RemoveEntry(t.path)
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("%s: %w", t.runtime.Name(), err))
+			continue
 		}
 		if removed {
 			cmd.Printf("removed %s from %s\n", t.runtime.Name(), t.path)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // collectUninstallTargets resolves config paths for each selected runtime,
@@ -99,7 +103,10 @@ func collectUninstallTargets(runtimes []mcpinstall.Runtime, scope mcpinstall.Sco
 		}
 		_, present, err := r.ReadEntry(path)
 		if err != nil {
-			return nil, err
+			// The file exists but our entry is undecodable (e.g. a malformed
+			// entry shape). Removal only needs key existence, so treat it as a
+			// candidate rather than aborting every other runtime's removal.
+			present = true
 		}
 		if !present {
 			continue
