@@ -5,7 +5,21 @@ package keyring
 import (
 	"errors"
 	"testing"
+
+	"github.com/zalando/go-keyring"
 )
+
+// MockInit initializes the underlying keyring with an in-memory mock.
+// Test-only: lives in _test.go so the mock never ships in production binaries.
+func MockInit() {
+	keyring.MockInit()
+}
+
+// MockInitWithError initializes the underlying keyring mock to always return the
+// given error. Useful for testing error paths. Test-only (see MockInit).
+func MockInitWithError(err error) {
+	keyring.MockInitWithError(err)
+}
 
 func TestSetGetDelete(t *testing.T) {
 	MockInit()

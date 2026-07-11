@@ -84,7 +84,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	// Legacy GitHub (global, only show when not filtering to a specific host)
 	if authStatusHostname == "" {
 		if token := v.GetString("token"); token != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), "  • Legacy token available via STING_TOKEN / config (fallback)")
+			fmt.Fprintln(cmd.OutOrStdout(), "  ! Legacy token set via STING_TOKEN / config — this OVERRIDES the stored OAuth credential above")
 		}
 	}
 
@@ -107,7 +107,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	if authStatusHostname == "" {
 		if token := v.GetString("gitlab_token"); token != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), "  • Legacy token available via STING_GITLAB_TOKEN / config (fallback)")
+			fmt.Fprintln(cmd.OutOrStdout(), "  ! Legacy token set via STING_GITLAB_TOKEN / config — this OVERRIDES the stored OAuth credential above")
 		}
 	}
 
@@ -118,7 +118,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "Run `sting auth github` to authenticate with GitHub using OAuth (recommended).")
 		fmt.Fprintln(cmd.OutOrStdout(), "Use --hostname for GitHub Enterprise Server or self-hosted GitLab instances.")
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Legacy PATs continue to work as a fallback.")
+	fmt.Fprintln(cmd.OutOrStdout(), "Note: a legacy PAT (STING_TOKEN / STING_GITLAB_TOKEN) takes precedence over — and overrides — any stored OAuth credential.")
 
 	return nil
 }

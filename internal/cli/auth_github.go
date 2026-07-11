@@ -3,8 +3,10 @@ package cli
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -103,11 +105,23 @@ func runAuthGitHub(cmd *cobra.Command, _ []string) error {
 		clientSecret = "6b0e3062797258cdc9fcc80ce5b7774be2d4d0a2"
 	}
 
+	// Determine whether the caller supplied a custom client-id / client-secret
+	// (via flag or environment). These must be provided as a matched pair: pairing
+	// a user-supplied credential with the embedded Skaphos default (or vice versa)
+	// can never authenticate and is almost always a copy/paste mistake.
+	customClientID := authGitHubClientID != "" || os.Getenv("STING_GITHUB_CLIENT_ID") != ""
+	customClientSecret := authGitHubClientSecret != "" || os.Getenv("STING_GITHUB_CLIENT_SECRET") != ""
+
+	if customClientID != customClientSecret {
+		//lint:ignore ST1005 user-facing CLI error with proper punctuation
+		//nolint:staticcheck // ST1005
+		return fmt.Errorf("both --client-id and --client-secret must be provided together (or via STING_GITHUB_CLIENT_ID / STING_GITHUB_CLIENT_SECRET) — mixing a custom OAuth credential with the built-in Skaphos default cannot authenticate.")
+	}
+
 	// GHES guidance: if the user is targeting a non-github.com host and is still
 	// using the default public credentials, give a clear, actionable error.
 	isEnterprise := hostname != "github.com" && !strings.HasSuffix(hostname, ".github.com")
-	usingDefaultCreds := (authGitHubClientID == "" && os.Getenv("STING_GITHUB_CLIENT_ID") == "") &&
-		(authGitHubClientSecret == "" && os.Getenv("STING_GITHUB_CLIENT_SECRET") == "")
+	usingDefaultCreds := !customClientID && !customClientSecret
 
 	if isEnterprise && usingDefaultCreds {
 		//lint:ignore ST1005 user-facing CLI error with proper punctuation and newlines
@@ -136,6 +150,10 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 		ClientSecret: clientSecret,
 		CallbackURI:  "http://127.0.0.1/callback",
 		Scopes:       []string{"repo", "read:org", "gist"}, // reasonable minimum for sting
+		// Bound every OAuth API request so a slow DNS/TLS handshake or an
+		// unresponsive endpoint cannot hang the CLI indefinitely. Without this
+		// the flow falls back to http.DefaultClient, which has no timeout.
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 	}
 
 	// Customize the UX callbacks (modeled on gh's experience)
@@ -144,6 +162,8 @@ See the documentation for the exact settings (enable Device Flow, callback http:
 		if authGitHubClipboard {
 			if err := clipboard.WriteAll(code); err == nil {
 				fmt.Fprintln(cmd.OutOrStdout(), "  (copied to clipboard)")
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not copy code to clipboard: %v\n", err)
 			}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Open %s in your browser to authorize.\n", verificationURL)

@@ -15,6 +15,12 @@
 //     ~/.config/gh during development, testing, or error conditions.)
 //   - All insecure (plaintext) credential storage is written exclusively
 //     to Sting's own hosts.yml using our own minimal implementation.
+//   - We never shell out to `gh auth token`, and we never silently adopt an
+//     ambient GitHub token (GH_TOKEN / GITHUB_TOKEN or the gh CLI config
+//     file). Consulting those ambient sources is strictly opt-in via
+//     STING_ALLOW_AMBIENT_GITHUB_TOKEN, so a stored Sting credential is never
+//     transparently replaced by whatever identity happens to live in the
+//     surrounding shell.
 //
 // The design follows the same logical "hosts.<composite>" structure that gh
 // uses for familiarity, but everything under Sting's own directory.
@@ -29,8 +35,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
-	"time"
 
 	ghauth "github.com/cli/go-gh/v2/pkg/auth"
 	"gopkg.in/yaml.v3"
@@ -63,11 +69,9 @@ const (
 // For PATs, only AccessToken is populated.
 // For OAuth, the full set may be present.
 type Token struct {
-	Type         TokenType
-	AccessToken  string
-	RefreshToken string    // may be empty for some providers
-	Expiry       time.Time // zero value means no expiry / does not expire
-	Username     string    // best-effort; populated after successful auth
+	Type        TokenType
+	AccessToken string
+	Username    string // best-effort; populated after successful auth
 }
 
 // Source describes where a token came from (for status + messaging).
@@ -130,6 +134,12 @@ type store struct {
 	// hosts holds the in-memory representation of the hosts section
 	// loaded from (or to be written to) hosts.yml.
 	hosts map[string]map[string]string // composite -> {oauth_token, pat_token, user, ...}
+
+	// loadErr records a failure to parse an existing hosts.yml at construction
+	// time. When set, the store refuses to write (Save/Delete) so a corrupt or
+	// unreadable file is never atomically replaced with a fresh (empty) map,
+	// which would silently wipe every other stored credential.
+	loadErr error
 }
 
 // defaultKeyringSvc returns the keyring service name for a (provider, host).
@@ -167,8 +177,16 @@ func newStore(dir string, kr KeyringBackend) *store {
 		kr:           kr,
 		insecurePath: dir,
 	}
-	// Load existing insecure hosts (best effort)
-	_ = s.loadInsecureHosts()
+	// Load existing insecure hosts. A parse/read failure is remembered in
+	// loadErr (not swallowed): the store then refuses to write so we never
+	// clobber a file we could not fully read. Callers that surface errors
+	// (New / NewInsecure) propagate loadErr to the user.
+	if err := s.loadInsecureHosts(); err != nil {
+		s.loadErr = err
+		// Do not keep a partial/empty map around: it must never be written
+		// over the on-disk file.
+		s.hosts = nil
+	}
 	return s
 }
 
@@ -181,7 +199,11 @@ func New() (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newStore(dir, defaultKeyring{}), nil
+	s := newStore(dir, defaultKeyring{})
+	if s.loadErr != nil {
+		return nil, fmt.Errorf("cannot use credentials file %s: %w", s.insecureHostsPath(), s.loadErr)
+	}
+	return s, nil
 }
 
 // NewInsecure creates a Store rooted at Sting's config directory that never uses the
@@ -193,15 +215,11 @@ func NewInsecure() (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newStore(dir, nil), nil
-}
-
-// WithFilePath returns a file-only Store that uses a specific directory for
-// plaintext storage (primarily for hermetic tests). It never consults the
-// system keyring and never touches GH_CONFIG_DIR, so test behavior is
-// deterministic regardless of whether a real keyring is available on the host.
-func WithFilePath(dir string) Store {
-	return newStore(dir, nil)
+	s := newStore(dir, nil)
+	if s.loadErr != nil {
+		return nil, fmt.Errorf("cannot use credentials file %s: %w", s.insecureHostsPath(), s.loadErr)
+	}
+	return s, nil
 }
 
 // KeyringBackend is the minimal interface we need from a keyring implementation.
@@ -256,6 +274,37 @@ func compositeHost(provider Provider, host string) string {
 	return string(provider) + ":" + host
 }
 
+// isKeyringMiss reports whether err is a benign "secret not present" result from
+// the keyring (as opposed to a locked/unavailable backend or a timeout). A miss
+// is expected and safe to fall through on; anything else means the credential
+// may exist but is currently unreadable.
+func isKeyringMiss(err error) bool {
+	return err == nil || errors.Is(err, keyring.ErrNotFound)
+}
+
+// ambientGitHubTokenAllowed reports whether the caller has explicitly opted in
+// to letting Sting consult ambient GitHub tokens (environment variables or the
+// gh CLI config file). It is off by default to honor the isolation guarantee.
+func ambientGitHubTokenAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// ambientSource maps a go-gh token source string to our Source enum. Tokens read
+// from environment variables (GH_TOKEN / GITHUB_TOKEN and the enterprise
+// variants) map to SourceEnv; tokens read from the gh config file map to
+// SourceConfig.
+func ambientSource(source string) Source {
+	if source == "oauth_token" {
+		return SourceConfig
+	}
+	return SourceEnv
+}
+
 // Save implements Store.
 func (s *store) Save(ctx context.Context, provider Provider, host string, tok Token, secureOnly bool) (bool, error) {
 	s.mu.Lock()
@@ -284,8 +333,13 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 		}
 		s.hosts[composite][tokenKey(tokType)] = tok.AccessToken
 		s.hosts[composite]["token_type"] = string(tokType)
+		// Always reconcile the stored username to the new credential's owner.
+		// Overwriting (or clearing) it prevents `auth status` from reporting a
+		// stale account after re-authenticating as a different user.
 		if tok.Username != "" {
 			s.hosts[composite]["user"] = tok.Username
+		} else {
+			delete(s.hosts[composite], "user")
 		}
 
 		if writeErr := s.saveInsecureHosts(); writeErr != nil {
@@ -308,8 +362,12 @@ func (s *store) Save(ctx context.Context, provider Provider, host string, tok To
 	delete(s.hosts[composite], "oauth_token")
 	delete(s.hosts[composite], "pat_token")
 	s.hosts[composite]["token_type"] = string(tokType)
+	// Always reconcile the stored username (see insecure path above) so a
+	// re-auth as a different account cannot leave a stale user marker behind.
 	if tok.Username != "" {
 		s.hosts[composite]["user"] = tok.Username
+	} else {
+		delete(s.hosts[composite], "user")
 	}
 	if writeErr := s.saveInsecureHosts(); writeErr != nil {
 		return false, fmt.Errorf("credential saved to keyring but failed to write hosts.yml marker: %w", writeErr)
@@ -326,24 +384,27 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 	composite := compositeHost(provider, host)
 
 	// 1. Try keyring (secure) first. Skipped entirely in file-only mode (nil backend).
+	//    A genuine miss (ErrNotFound) is fine and we fall through; any other error
+	//    means the keyring is present but unusable (locked, backend unavailable,
+	//    timeout). We remember that so we can refuse to silently substitute an
+	//    ambient identity for a Sting credential we know exists (see below).
+	var keyringErr error
 	if s.kr != nil {
 		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth)); err == nil && tokStr != "" {
 			return Token{
 				Type:        TokenTypeOAuth,
 				AccessToken: tokStr,
 			}, SourceKeyring, nil
+		} else if err != nil && !isKeyringMiss(err) {
+			keyringErr = err
 		}
 		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypePAT)); err == nil && tokStr != "" {
 			return Token{
 				Type:        TokenTypePAT,
 				AccessToken: tokStr,
 			}, SourceKeyring, nil
-		}
-		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), ""); err == nil && tokStr != "" {
-			return Token{
-				Type:        TokenTypeOAuth,
-				AccessToken: tokStr,
-			}, SourceKeyring, nil
+		} else if err != nil && !isKeyringMiss(err) {
+			keyringErr = err
 		}
 	}
 
@@ -364,36 +425,36 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 					Username:    entry["user"],
 				}, SourceFile, nil
 			}
+			// A marker entry with no in-file token means the real secret lives in
+			// the keyring. If the keyring read failed above, the credential exists
+			// but we cannot read it: fail loudly rather than falling through to an
+			// ambient token, which would silently switch the caller's identity.
+			if keyringErr != nil {
+				return Token{}, "", fmt.Errorf("a stored credential for %s/%s exists but the keyring is unavailable: %w", provider, host, keyringErr)
+			}
 		}
 	}
 
-	// 3. For GitHub providers, also consult go-gh/pkg/auth as an additional source.
-	//    This is read-only and does not involve writing config.
-	if provider == ProviderGitHub {
-		if token, source := ghauth.TokenForHost(host); token != "" {
-			ourSource := SourceConfig
-			switch source {
-			case "gh":
-				ourSource = SourceKeyring
-			case "oauth_token":
-				ourSource = SourceFile
-			}
-			return Token{
-				Type:        TokenTypeOAuth,
-				AccessToken: token,
-			}, ourSource, nil
-		}
-
+	// 3. Ambient GitHub tokens (GH_TOKEN / GITHUB_TOKEN or the gh CLI config
+	//    file) are consulted ONLY when explicitly opted in. This preserves the
+	//    isolation guarantee (ADR 0002): by default Sting uses only its own
+	//    managed credential and never adopts the surrounding shell's identity.
+	//    We deliberately use TokenFromEnvOrConfig (never TokenForHost) so we do
+	//    not shell out to `gh auth token`.
+	if provider == ProviderGitHub && ambientGitHubTokenAllowed() {
 		if token, source := ghauth.TokenFromEnvOrConfig(host); token != "" {
-			ourSource := SourceConfig
-			if source == "oauth_token" {
-				ourSource = SourceFile
-			}
 			return Token{
 				Type:        TokenTypeOAuth,
 				AccessToken: token,
-			}, ourSource, nil
+			}, ambientSource(source), nil
 		}
+	}
+
+	// If the keyring was unusable and we had no on-disk entry either, surface the
+	// keyring error rather than a bare "not found" so operators can tell a locked
+	// keyring apart from a genuinely absent credential.
+	if keyringErr != nil {
+		return Token{}, "", fmt.Errorf("no readable credential for %s/%s (keyring unavailable): %w", provider, host, keyringErr)
 	}
 
 	return Token{}, "", fmt.Errorf("no credential found for %s/%s", provider, host)
@@ -406,11 +467,28 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 
 	composite := compositeHost(provider, host)
 
-	// Best effort delete from both secure and insecure (keyring skipped in file-only mode)
+	// A Sting credential always leaves a record in hosts.yml: either the token
+	// itself (file storage) or a token-less marker (keyring storage). If there is
+	// no such record we have nothing to remove, so a broken or absent keyring
+	// backend must not make logout spuriously fail.
+	_, hasRecord := s.hosts[composite]
+
+	// Delete from both secure and insecure locations, collecting real failures so
+	// logout reports success only when the credential is actually gone. A keyring
+	// miss (nothing stored under that user) counts as success. Keyring failures
+	// are only fatal when a record exists (i.e. the token may still be present).
+	var errs []error
 	if s.kr != nil {
-		_ = s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth))
-		_ = s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypePAT))
-		_ = s.kr.Delete(s.keyringSvc(provider, host), "")
+		errOAuth := s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth))
+		errPAT := s.kr.Delete(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypePAT))
+		if hasRecord {
+			if errOAuth != nil && !isKeyringMiss(errOAuth) {
+				errs = append(errs, fmt.Errorf("keyring delete (oauth): %w", errOAuth))
+			}
+			if errPAT != nil && !isKeyringMiss(errPAT) {
+				errs = append(errs, fmt.Errorf("keyring delete (pat): %w", errPAT))
+			}
+		}
 	}
 
 	if s.hosts != nil {
@@ -422,10 +500,15 @@ func (s *store) Delete(ctx context.Context, provider Provider, host string) erro
 			if len(entry) == 0 {
 				delete(s.hosts, composite)
 			}
-			_ = s.saveInsecureHosts()
+			if err := s.saveInsecureHosts(); err != nil {
+				errs = append(errs, fmt.Errorf("update hosts.yml: %w", err))
+			}
 		}
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to fully remove credentials for %s/%s: %w", provider, host, errors.Join(errs...))
+	}
 	return nil
 }
 
@@ -465,14 +548,6 @@ func (s *store) List(ctx context.Context) ([]CredentialRef, error) {
 	return refs, nil
 }
 
-// WithKeyringForTest returns a Store that uses the provided KeyringBackend for
-// the secure path (useful for hermetic tests). A nil backend selects file-only
-// mode (no keyring), matching WithFilePath. The insecure path uses our own
-// file-based storage under the given directory.
-func WithKeyringForTest(backend KeyringBackend, configDir string) Store {
-	return newStore(configDir, backend)
-}
-
 // --- Insecure hosts.yml handling (strictly scoped to Sting) ---
 
 type hostsFile struct {
@@ -510,6 +585,13 @@ func (s *store) loadInsecureHosts() error {
 func (s *store) saveInsecureHosts() error {
 	if s.insecurePath == "" {
 		return nil
+	}
+
+	// Never overwrite a file we failed to parse at load time: the atomic rename
+	// below would replace all existing credentials/markers with our fresh map,
+	// silently destroying anything we could not read. Refuse instead.
+	if s.loadErr != nil {
+		return fmt.Errorf("refusing to overwrite credentials file that failed to load: %w", s.loadErr)
 	}
 
 	path := s.insecureHostsPath()

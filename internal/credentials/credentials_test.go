@@ -601,16 +601,70 @@ func TestLoadInsecureHosts_PermissionError(t *testing.T) {
 	}
 }
 
-// TestLoadGitHubGHAuthFallbacks exercises the ghauth fallback branches in Load
-// (TokenForHost / TokenFromEnvOrConfig paths).
+// TestLoadGitHubGHAuthFallbacks pins the ADR 0002 isolation contract: an ambient
+// GITHUB_TOKEN must never leak into a Sting Load. By default it is ignored
+// entirely; even when a stored credential exists, the stored credential wins;
+// and the ambient token is only ever consulted when explicitly opted in.
 func TestLoadGitHubGHAuthFallbacks(t *testing.T) {
-	tmp := t.TempDir()
-	s := WithFilePath(tmp)
+	// Fully isolate ambient auth sources so this test is deterministic.
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "ambient-should-not-leak")
+	// Default: opt-in flag unset.
+	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "")
 
-	// Call Load for GitHub with no local credential. This will exercise
-	// the ghauth fallback code paths regardless of whether a token is found
-	// in the environment or gh config on this machine.
-	_, _, _ = s.Load(context.Background(), ProviderGitHub, "github.com")
+	t.Run("stored credential wins over ambient env token", func(t *testing.T) {
+		tmp := t.TempDir()
+		s := WithFilePath(tmp)
+
+		stored := Token{Type: TokenTypeOAuth, AccessToken: "sting-managed-token"}
+		if _, err := s.Save(context.Background(), ProviderGitHub, "github.com", stored, false); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.AccessToken != "sting-managed-token" {
+			t.Fatalf("ambient token leaked: got %q, want the stored Sting token", got.AccessToken)
+		}
+		if src != SourceFile {
+			t.Fatalf("expected SourceFile, got %s", src)
+		}
+	})
+
+	t.Run("ambient env token is not consumed by default", func(t *testing.T) {
+		tmp := t.TempDir()
+		s := WithFilePath(tmp)
+
+		// No stored credential. With the opt-in flag unset, an ambient
+		// GITHUB_TOKEN must NOT be returned; Load must report no credential.
+		_, _, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+		if err == nil {
+			t.Fatal("expected no-credential error; ambient GITHUB_TOKEN must not be adopted by default")
+		}
+	})
+
+	t.Run("ambient env token consulted only when opted in", func(t *testing.T) {
+		t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "1")
+
+		tmp := t.TempDir()
+		s := WithFilePath(tmp)
+
+		got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+		if err != nil {
+			t.Fatalf("Load with opt-in: %v", err)
+		}
+		if got.AccessToken != "ambient-should-not-leak" {
+			t.Fatalf("expected opted-in ambient token, got %q", got.AccessToken)
+		}
+		if src != SourceEnv {
+			t.Fatalf("expected SourceEnv for an env-var token, got %s", src)
+		}
+	})
 }
 
 // TestDeleteCleansEmptyComposite exercises the branch where Delete removes the
@@ -679,6 +733,155 @@ func TestSaveKeyringSuccessCreatesMarker(t *testing.T) {
 	got, src, err := s.Load(context.Background(), ProviderGitHub, "ghe.example.com")
 	if err != nil || got.AccessToken != "fake-token-from-keyring" || src != SourceKeyring {
 		t.Errorf("Load after keyring success failed: got=%+v src=%s err=%v", got, src, err)
+	}
+}
+
+// lockedKeyring simulates a present-but-unusable keyring: Set succeeds (so a
+// marker can be written), but reads and deletes fail with a non-not-found error.
+type lockedKeyring struct{}
+
+func (lockedKeyring) Set(service, user, secret string) error { return nil }
+func (lockedKeyring) Get(service, user string) (string, error) {
+	return "", errors.New("keyring is locked")
+}
+func (lockedKeyring) Delete(service, user string) error { return errors.New("keyring is locked") }
+
+// TestSaveDoesNotClobberUnparseableFile is the regression guard for the "corrupt
+// hosts.yml turns the next Save into a wipe" finding: when the existing file
+// fails to parse, Save must refuse and leave the file byte-for-byte unchanged.
+func TestSaveDoesNotClobberUnparseableFile(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "hosts.yml")
+	original := []byte("this is not: valid: yaml: [")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatalf("seed corrupt file: %v", err)
+	}
+
+	s := WithFilePath(tmp)
+
+	_, err := s.Save(context.Background(), ProviderGitHub, "github.com", Token{AccessToken: "new-token"}, false)
+	if err == nil {
+		t.Fatal("expected Save to fail rather than clobber an unparseable credentials file")
+	}
+
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read back: %v", readErr)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("credentials file was overwritten:\n got: %q\nwant: %q", after, original)
+	}
+}
+
+// TestNewRefusesUnparseableFile verifies New surfaces (rather than swallows) a
+// corrupt hosts.yml so the CLI fails loudly instead of silently wiping it.
+func TestNewRefusesUnparseableFile(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+
+	stingDir := filepath.Join(xdg, "sting")
+	if err := os.MkdirAll(stingDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stingDir, "hosts.yml"), []byte("not: valid: yaml: ["), 0600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := New(); err == nil {
+		t.Fatal("expected New to fail on an unparseable hosts.yml")
+	}
+}
+
+// TestDeleteSurfacesKeyringFailure is the regression guard for "logout reports
+// success while the token may still exist": when a credential record exists and
+// the keyring delete fails, Delete must return an error.
+func TestDeleteSurfacesKeyringFailure(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithKeyringForTest(lockedKeyring{}, tmp)
+
+	// Set succeeds, so a keyring marker is written for this host.
+	if _, err := s.Save(context.Background(), ProviderGitHub, "github.com", Token{
+		Type:        TokenTypeOAuth,
+		AccessToken: "secret",
+		Username:    "octocat",
+	}, false); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := s.Delete(context.Background(), ProviderGitHub, "github.com")
+	if err == nil {
+		t.Fatal("expected Delete to surface the keyring-delete failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "keyring delete") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestLoadErrorsWhenKeyringUnavailableWithMarker verifies that when a stored
+// credential is known to exist (keyring marker) but the keyring cannot be read,
+// Load returns an error instead of silently substituting an ambient token —
+// even with the ambient opt-in enabled.
+func TestLoadErrorsWhenKeyringUnavailableWithMarker(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "ambient-must-not-be-substituted")
+	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "1") // even opted in, a locked keyring must error
+
+	tmp := t.TempDir()
+	s := WithKeyringForTest(lockedKeyring{}, tmp)
+
+	// Set succeeds → a token-less marker is written for github.com.
+	if _, err := s.Save(context.Background(), ProviderGitHub, "github.com", Token{
+		Type:        TokenTypeOAuth,
+		AccessToken: "real-secret",
+	}, false); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, _, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+	if err == nil {
+		t.Fatalf("expected an error when the keyring is unavailable but a marker exists; got token %q", got.AccessToken)
+	}
+	if got.AccessToken == "ambient-must-not-be-substituted" {
+		t.Fatal("ambient token was silently substituted for an unreadable Sting credential")
+	}
+}
+
+// TestSaveOverwritesStaleUsername is the regression guard for the "stale username
+// on re-auth" finding: re-saving must always reconcile the stored username.
+func TestSaveOverwritesStaleUsername(t *testing.T) {
+	tmp := t.TempDir()
+	s := WithFilePath(tmp)
+
+	save := func(user string) {
+		t.Helper()
+		if _, err := s.Save(context.Background(), ProviderGitHub, "github.com", Token{
+			Type:        TokenTypeOAuth,
+			AccessToken: "tok",
+			Username:    user,
+		}, false); err != nil {
+			t.Fatalf("Save(%q): %v", user, err)
+		}
+	}
+
+	save("alice")
+	if got, _, _ := s.Load(context.Background(), ProviderGitHub, "github.com"); got.Username != "alice" {
+		t.Fatalf("expected alice, got %q", got.Username)
+	}
+
+	// Re-auth as a different user must overwrite the stale username.
+	save("bob")
+	if got, _, _ := s.Load(context.Background(), ProviderGitHub, "github.com"); got.Username != "bob" {
+		t.Fatalf("stale username: expected bob, got %q", got.Username)
+	}
+
+	// Re-auth with no username must clear the stale one, not keep it.
+	save("")
+	if got, _, _ := s.Load(context.Background(), ProviderGitHub, "github.com"); got.Username != "" {
+		t.Fatalf("expected username cleared, got %q", got.Username)
 	}
 }
 
