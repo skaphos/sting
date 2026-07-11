@@ -87,15 +87,3 @@ func Delete(service, user string) error {
 		return &TimeoutError{"timeout while trying to delete secret from keyring"}
 	}
 }
-
-// MockInit initializes the underlying keyring with an in-memory mock.
-// Use this in tests.
-func MockInit() {
-	keyring.MockInit()
-}
-
-// MockInitWithError initializes the underlying keyring mock to always return the given error.
-// Useful for testing error paths.
-func MockInitWithError(err error) {
-	keyring.MockInitWithError(err)
-}

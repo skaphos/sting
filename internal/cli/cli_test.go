@@ -659,7 +659,7 @@ func TestAuthStatusOutput_VariousStates(t *testing.T) {
 				// Simulate legacy token via viper (the global v in root.go)
 				v.Set("token", "legacy-gh-pat")
 			},
-			wantSubstr: []string{"Legacy token available via STING_TOKEN"},
+			wantSubstr: []string{"Legacy token set via STING_TOKEN", "OVERRIDES"},
 		},
 		{
 			name: "legacy gitlab only",
@@ -667,7 +667,7 @@ func TestAuthStatusOutput_VariousStates(t *testing.T) {
 				t.Setenv("GH_CONFIG_DIR", t.TempDir())
 				v.Set("gitlab_token", "legacy-gl-pat")
 			},
-			wantSubstr: []string{"Legacy token available via STING_GITLAB_TOKEN"},
+			wantSubstr: []string{"Legacy token set via STING_GITLAB_TOKEN", "OVERRIDES"},
 		},
 	}
 
@@ -1013,6 +1013,7 @@ func TestRunAuthGitLab_WithToken(t *testing.T) {
 }
 
 func TestRunAuthLogout_Idempotent(t *testing.T) {
+	isolateHome(t) // hermetic: New() must not read a leaked real ~/.config/sting store
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	origHost := authLogoutHostname
@@ -1035,6 +1036,7 @@ func TestRunAuthLogout_Idempotent(t *testing.T) {
 }
 
 func TestRunAuthLogout_SpecificProvider(t *testing.T) {
+	isolateHome(t) // hermetic: New() must not read a leaked real ~/.config/sting store
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 
 	origHost := authLogoutHostname

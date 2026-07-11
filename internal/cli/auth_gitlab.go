@@ -3,7 +3,9 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -167,7 +169,7 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 
 	code, err := device.RequestCode(httpClient, deviceURL, clientID, []string{"read_api"})
 	if err != nil {
-		if err == device.ErrUnsupported {
+		if errors.Is(err, device.ErrUnsupported) {
 			return fmt.Errorf("this GitLab instance does not support device flow; use --with-token instead")
 		}
 		return fmt.Errorf("failed to request device code: %w", err)
@@ -178,6 +180,8 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 	if authGitLabClipboard {
 		if err := clipboard.WriteAll(code.UserCode); err == nil {
 			fmt.Fprintln(cmd.OutOrStdout(), "  (copied to clipboard)")
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not copy code to clipboard: %v\n", err)
 		}
 	}
 
@@ -204,10 +208,17 @@ See docs/oauth-app-registration.md for the exact settings (you must enable "Devi
 		DeviceCode:   code,
 	})
 	if err != nil {
-		if err == device.ErrTimeout {
+		// The poller cancels its context when the device code expires, so an
+		// expiry surfaces as context.DeadlineExceeded (not device.ErrTimeout).
+		// A user Ctrl-C surfaces as context.Canceled; distinguish the two.
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
 			return fmt.Errorf("device authorization timed out")
+		case errors.Is(err, context.Canceled):
+			return fmt.Errorf("authentication canceled")
+		default:
+			return fmt.Errorf("authentication failed: %w", err)
 		}
-		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Fetch username via GitLab REST (best effort; used for status display).
