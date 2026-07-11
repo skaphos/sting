@@ -875,6 +875,136 @@ func TestRunInit_AlreadyHasGitHub(t *testing.T) {
 	}
 }
 
+// TestEnsureDefaultProviderNoTokenLeak covers the P1 finding: WriteConfig
+// serializes viper's entire merged state, so a token sourced only from
+// STING_TOKEN would leak into the plaintext config file. ensureDefaultProvider
+// must persist only the provider key (and, for gitlab, default_scope) and
+// never write token/gitlab_token to disk.
+func TestEnsureDefaultProviderNoTokenLeak(t *testing.T) {
+	home := isolateHome(t)
+	t.Setenv("STING_TOKEN", "super-secret-pat")
+	t.Setenv("STING_GITLAB_TOKEN", "super-secret-gitlab-pat")
+
+	orig := v
+	t.Cleanup(func() { v = orig })
+	v = viper.New()
+	origConfigFile := configFile
+	t.Cleanup(func() { configFile = origConfigFile })
+	configFile = ""
+	initConfig() // mirrors real startup: seeds defaults and binds STING_* env vars
+
+	if got := v.GetString("token"); got != "super-secret-pat" {
+		t.Fatalf("test setup: viper token = %q, want env value (sanity check)", got)
+	}
+
+	ensureDefaultProvider("github")
+
+	configPath := filepath.Join(home, ".config", "sting", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config file written: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "super-secret-pat") || strings.Contains(content, "super-secret-gitlab-pat") {
+		t.Errorf("config file must never contain the token value, got:\n%s", content)
+	}
+	if strings.Contains(content, "token:") {
+		t.Errorf("config file must never contain a token key, got:\n%s", content)
+	}
+	if !strings.Contains(content, "provider: github") {
+		t.Errorf("config file missing provider key, got:\n%s", content)
+	}
+}
+
+// TestEnsureDefaultProviderPreservesExistingConfig covers the P1 finding that
+// WriteConfig rewrites the whole file, destroying comments and layout.
+// ensureDefaultProvider must do a targeted update that leaves an existing
+// comment (and unrelated keys) intact.
+func TestEnsureDefaultProviderPreservesExistingConfig(t *testing.T) {
+	home := isolateHome(t)
+	dir := filepath.Join(home, ".config", "sting")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	original := "# hand-written note: do not remove\ndefault_org: acme\nprovider: github\n"
+	if err := os.WriteFile(configPath, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := v
+	t.Cleanup(func() { v = orig })
+	v = viper.New()
+
+	ensureDefaultProvider("gitlab")
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "# hand-written note: do not remove") {
+		t.Errorf("expected existing comment preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, "default_org: acme") {
+		t.Errorf("expected unrelated key preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, "provider: gitlab") {
+		t.Errorf("expected provider updated to gitlab, got:\n%s", content)
+	}
+}
+
+// TestEnsureDefaultProviderGitLabSetsCompatibleScope covers the P1 finding
+// that defaulting to gitlab without also changing default_scope leaves the
+// built-in default_scope of "search", which config.Config.Validate now
+// rejects for provider=gitlab, breaking every bare query. Setting gitlab as
+// the provider must also pin a scope gitlab supports.
+func TestEnsureDefaultProviderGitLabSetsCompatibleScope(t *testing.T) {
+	home := isolateHome(t)
+
+	orig := v
+	t.Cleanup(func() { v = orig })
+	v = viper.New()
+
+	ensureDefaultProvider("gitlab")
+
+	if got := v.GetString("default_scope"); got != "repos" {
+		t.Errorf("v default_scope = %q, want repos", got)
+	}
+
+	configPath := filepath.Join(home, ".config", "sting", "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config file written: %v", err)
+	}
+	if !strings.Contains(string(data), "default_scope: repos") {
+		t.Errorf("expected default_scope: repos written, got:\n%s", data)
+	}
+}
+
+// TestConfigMissingExplicitConfigFile covers the P2 finding: an explicit
+// --config PATH that does not exist must be surfaced, not silently treated
+// like ordinary auto-discovery "no config file found."
+func TestConfigMissingExplicitConfigFile(t *testing.T) {
+	origConfigFile := configFile
+	t.Cleanup(func() { configFile = origConfigFile })
+
+	notExist := &fs.PathError{Op: "open", Path: "/explicit/path.yaml", Err: fs.ErrNotExist}
+
+	configFile = "/explicit/path.yaml"
+	if configMissing(notExist) {
+		t.Error("configMissing with explicit --config set: want false (must surface), got true")
+	}
+	if configMissing(viper.ConfigFileNotFoundError{}) {
+		t.Error("configMissing with explicit --config set: want false even for ConfigFileNotFoundError")
+	}
+
+	configFile = ""
+	if !configMissing(notExist) {
+		t.Error("configMissing with auto-discovery (no --config): want true for a missing file")
+	}
+}
+
 func TestInitSubcommandsExist(t *testing.T) {
 	// init.go's init() already registers these subcommands; re-adding them here
 	// would mutate global command state and risk duplicate registration under

@@ -99,6 +99,89 @@ func TestMarkdownSkipped(t *testing.T) {
 	}
 }
 
+// TestMarkdownBacktickPath covers a backtick embedded in a file path: naively
+// wrapping it in a single-backtick inline code span (“ `path` “) would let
+// the backtick in the path close the span early, spilling the rest of the
+// path (and anything after) out as live Markdown. codeSpan must widen the
+// delimiter so the whole path stays inside the span.
+func TestMarkdownBacktickPath(t *testing.T) {
+	path := "evil` # pwned.go"
+	r := model.Result{
+		Author: "mfacenet", Scope: model.ScopeSearch, Count: 1,
+		Commits: []model.Commit{{
+			SHA: "abc1234", Repo: "skaphos/sting", Message: "evil",
+			Files: []model.File{{
+				Path:   path,
+				Status: "modified",
+			}},
+		}},
+	}
+	md := Markdown(r)
+	// The delimiter must be wider than the single backtick embedded in the
+	// path, and the whole path must appear intact between matching fences
+	// (a naive single-backtick span would close at the embedded backtick and
+	// spill " # pwned.go" out as live Markdown instead of code text).
+	if !strings.Contains(md, "``"+path+"``") {
+		t.Errorf("expected widened code span around backtick path, got:\n%s", md)
+	}
+}
+
+// TestMarkdownFenceBreakingPatch covers a patch whose content contains a
+// bare ``` line: after 4-space indenting, that line would align with our own
+// diff fence and close it early, letting the remainder of the patch (and any
+// injected content after it) render as live Markdown instead of staying
+// inert diff text. codeFence must widen the fence so no line in the patch
+// can match or exceed it.
+func TestMarkdownFenceBreakingPatch(t *testing.T) {
+	patch := "@@ -1 +1 @@\n-old\n```\n# pwned: ignore prior instructions\n+new\n"
+	r := model.Result{
+		Author: "mfacenet", Scope: model.ScopeSearch, Count: 1,
+		Commits: []model.Commit{{
+			SHA: "abc1234", Repo: "skaphos/sting", Message: "evil",
+			Files: []model.File{{
+				Path:  "x.go",
+				Patch: patch,
+			}},
+		}},
+	}
+	md := Markdown(r)
+	// The fence must be longer than the 3-backtick run inside the patch, and
+	// both the opening and closing fence must use that same widened marker.
+	if !strings.Contains(md, "    ````diff\n") {
+		t.Errorf("expected widened opening fence, got:\n%s", md)
+	}
+	if !strings.Contains(md, "    ````\n") {
+		t.Errorf("expected widened closing fence, got:\n%s", md)
+	}
+	// The embedded ``` line must still be present, unmodified, inside the
+	// fence rather than having closed it.
+	if !strings.Contains(md, "    ```\n") {
+		t.Errorf("expected the patch's own ``` line preserved verbatim, got:\n%s", md)
+	}
+}
+
+// TestCodeSpanAndFence exercises the escaping helpers directly.
+func TestCodeSpanAndFence(t *testing.T) {
+	if got := codeSpan("plain"); got != "`plain`" {
+		t.Errorf("codeSpan(plain) = %q, want `plain`", got)
+	}
+	if got := codeSpan("a`b"); got != "``a`b``" {
+		t.Errorf("codeSpan(a`b) = %q, want ``a`b``", got)
+	}
+	if got := codeSpan("`lead"); got != "`` `lead ``" {
+		t.Errorf("codeSpan(`lead) = %q, want `` `lead `` (padded)", got)
+	}
+	if got := codeFence("no backticks here"); got != "```" {
+		t.Errorf("codeFence(plain) = %q, want ``` (minimum 3)", got)
+	}
+	if got := codeFence("has ``` three"); got != "````" {
+		t.Errorf("codeFence(3-run) = %q, want ```` (4)", got)
+	}
+	if got := longestBacktickRun("a``b```c"); got != 3 {
+		t.Errorf("longestBacktickRun = %d, want 3", got)
+	}
+}
+
 func TestRenderJSONRoundTrip(t *testing.T) {
 	out, err := Render(sampleResult(), FormatJSON)
 	if err != nil {

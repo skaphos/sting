@@ -96,10 +96,14 @@ func initConfig() {
 	}
 }
 
-// configMissing reports whether err is "no config file found", whether from
-// auto-discovery (ConfigFileNotFoundError) or an explicit --config path that
-// does not exist (a PathError).
+// configMissing reports whether err is "no config file found" from
+// auto-discovery (ConfigFileNotFoundError). An explicit --config path that
+// does not exist is NOT considered missing: the user named that file, so its
+// absence is surfaced rather than silently ignored.
 func configMissing(err error) bool {
+	if configFile != "" {
+		return false
+	}
 	var notFound viper.ConfigFileNotFoundError
 	return errors.As(err, &notFound) || os.IsNotExist(err)
 }

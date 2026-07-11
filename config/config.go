@@ -62,37 +62,19 @@ type Config struct {
 	IncludePullRequests bool `mapstructure:"include_prs"`
 }
 
-// Defaults are the built-in configuration values, keyed by their canonical
-// config key. The CLI seeds viper with these so they participate uniformly in
-// precedence resolution.
-func Defaults() map[string]any {
-	return map[string]any{
-		"provider":        string(model.ProviderGitHub),
-		"token":           "",
-		"base_url":        "",
-		"gitlab_token":    "",
-		"gitlab_base_url": "",
-		"default_scope":   string(model.ScopeSearch),
-		"default_window":  "7d",
-		"default_repos":   []string{},
-		"default_org":     "",
-		"default_format":  "markdown",
-		"per_page":        100,
-		"max_commits":     0,
-		"include_stats":   false,
-		"include_files":   false,
-		"include_diffs":   false,
-		"max_diff_bytes":  model.DefaultMaxDiffBytes,
-		"include_prs":     false,
-	}
-}
-
-// Default returns the built-in configuration as a Config value.
+// Default returns the built-in configuration as a Config value. This is the
+// single source of truth for default values; Defaults() derives its map
+// representation from it so the two cannot drift apart.
+//
+// Default is intentional public API consumed by the sibling wake project
+// (see ADR 0004) in addition to Defaults(), which is what the sting CLI
+// itself seeds viper with.
 func Default() Config {
 	return Config{
 		DefaultProvider: model.ProviderGitHub,
 		DefaultScope:    model.ScopeSearch,
 		DefaultWindow:   "7d",
+		DefaultRepos:    []string{},
 		DefaultFormat:   "markdown",
 		PerPage:         100,
 		MaxCommits:      0,
@@ -103,6 +85,33 @@ func Default() Config {
 	}
 }
 
+// Defaults are the built-in configuration values, keyed by their canonical
+// config key. The CLI seeds viper with these so they participate uniformly in
+// precedence resolution. It is derived from Default() so the map and struct
+// representations of the built-in configuration stay in sync.
+func Defaults() map[string]any {
+	d := Default()
+	return map[string]any{
+		"provider":        string(d.DefaultProvider),
+		"token":           d.Token,
+		"base_url":        d.BaseURL,
+		"gitlab_token":    d.GitLabToken,
+		"gitlab_base_url": d.GitLabBaseURL,
+		"default_scope":   string(d.DefaultScope),
+		"default_window":  d.DefaultWindow,
+		"default_repos":   d.DefaultRepos,
+		"default_org":     d.DefaultOrg,
+		"default_format":  d.DefaultFormat,
+		"per_page":        d.PerPage,
+		"max_commits":     d.MaxCommits,
+		"include_stats":   d.IncludeStats,
+		"include_files":   d.IncludeFiles,
+		"include_diffs":   d.IncludeDiffs,
+		"max_diff_bytes":  d.MaxDiffBytes,
+		"include_prs":     d.IncludePullRequests,
+	}
+}
+
 // Validate checks that the resolved configuration is internally consistent.
 func (cfg Config) Validate() error {
 	if cfg.DefaultProvider != "" && !cfg.DefaultProvider.Valid() {
@@ -110,6 +119,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.DefaultScope != "" && !cfg.DefaultScope.Valid() {
 		return fmt.Errorf("invalid default_scope %q (want search|repos|org)", cfg.DefaultScope)
+	}
+	if cfg.DefaultProvider == model.ProviderGitLab && cfg.DefaultScope == model.ScopeSearch {
+		return fmt.Errorf("provider %q does not support default_scope %q (use repos or org)", cfg.DefaultProvider, cfg.DefaultScope)
 	}
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return fmt.Errorf("per_page must be 1-100, got %d", cfg.PerPage)
@@ -142,10 +154,19 @@ func ParseWindow(s string) (time.Duration, error) {
 			return 0, fmt.Errorf("negative window %q", s)
 		}
 		day := 24 * time.Hour
+		multiplier := int64(1)
 		if unit == 'w' {
-			return time.Duration(n) * 7 * day, nil
+			multiplier = 7
 		}
-		return time.Duration(n) * day, nil
+		// Detect overflow before it happens: n * multiplier * day must stay
+		// within int64 and non-negative, or a huge window (e.g. "20000w")
+		// silently wraps into a negative duration that later passes
+		// Validate and fails every query with a misleading error.
+		const maxWindow = 100 * 365 * 24 * time.Hour // a sane cap: 100 years
+		if n != 0 && int64(n) > int64(maxWindow)/(multiplier*int64(day)) {
+			return 0, fmt.Errorf("window %q exceeds maximum supported duration", s)
+		}
+		return time.Duration(n) * time.Duration(multiplier) * day, nil
 	default:
 		d, err := time.ParseDuration(s)
 		if err != nil {
