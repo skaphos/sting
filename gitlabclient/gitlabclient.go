@@ -17,6 +17,7 @@ import (
 
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
+	"golang.org/x/sync/errgroup"
 )
 
 const defaultBaseURL = "https://gitlab.com/api/v4/"
@@ -31,12 +32,20 @@ const httpTimeout = 30 * time.Second
 // realistic page count for a single query.
 const maxPages = 10000
 
+// defaultConcurrency bounds how many per-commit diff requests run at once when a
+// query asks for files or diffs. GitLab returns stats inline with the commit
+// list (with_stats), but each commit's diff needs its own request, so a large
+// author history otherwise costs one serial round-trip per commit; bounding the
+// fan-out speeds that up without hammering the instance.
+const defaultConcurrency = 8
+
 // Client retrieves commits from GitLab for an author over a time window.
 type Client struct {
-	http    *http.Client
-	baseURL string
-	token   string
-	perPage int
+	http        *http.Client
+	baseURL     string
+	token       string
+	perPage     int
+	concurrency int
 }
 
 // New builds a Client. token may be empty for public data. baseURL, when set,
@@ -67,10 +76,11 @@ func New(token, baseURL string, perPage int) (*Client, error) {
 		// A dedicated client with a timeout, rather than the shared
 		// http.DefaultClient, so a stalled request cannot hang a scan and the
 		// global default client is never mutated.
-		http:    &http.Client{Timeout: httpTimeout},
-		baseURL: base,
-		token:   token,
-		perPage: perPage,
+		http:        &http.Client{Timeout: httpTimeout},
+		baseURL:     base,
+		token:       token,
+		perPage:     perPage,
+		concurrency: defaultConcurrency,
 	}, nil
 }
 
@@ -113,6 +123,15 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
+	}
+
+	// Stats already arrived inline with the commit list (with_stats); only files
+	// and diffs need a per-commit request. Fetch those concurrently, and only for
+	// the commits that survive the cap (so the truncation-probe commit is skipped).
+	if q.IncludeFiles || q.IncludeDiffs {
+		if err := c.enrichDiffs(ctx, commits, q); err != nil {
+			return model.Result{}, err
+		}
 	}
 
 	return model.Result{
@@ -220,13 +239,7 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 			return nil, err
 		}
 		for _, gc := range commits {
-			cm := fromCommit(repoLabel, gc)
-			if q.IncludeFiles || q.IncludeDiffs {
-				if err := c.fillDiffDetails(ctx, project, repoLabel, &cm, q); err != nil {
-					return nil, err
-				}
-			}
-			out = append(out, cm)
+			out = append(out, fromCommit(repoLabel, gc))
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, nil
 			}
@@ -409,6 +422,23 @@ func fromCommit(repo string, gc gitlabCommit) model.Commit {
 		}
 	}
 	return cm
+}
+
+// enrichDiffs fills each commit's files/diffs concurrently, bounded by
+// c.concurrency. GitLab accepts a URL-encoded "namespace/path" as a project
+// identifier, so cm.Repo (the path recorded during listing, for both repos and
+// group scope) addresses the diff endpoint. Each worker writes only its own
+// element, so order is preserved; the first failure cancels the rest and aborts.
+func (c *Client) enrichDiffs(ctx context.Context, commits []model.Commit, q model.Query) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(c.concurrency)
+	for i := range commits {
+		cm := &commits[i]
+		g.Go(func() error {
+			return c.fillDiffDetails(ctx, cm.Repo, cm.Repo, cm, q)
+		})
+	}
+	return g.Wait()
 }
 
 func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string, cm *model.Commit, q model.Query) error {
