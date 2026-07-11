@@ -141,7 +141,8 @@ The process is identical, but you perform it on your own instance.
 If the instance does not support device flow (older GitLab or the checkbox is missing), fall back to:
 
 ```bash
-echo 'glpat-xxxxxxxxxxxx' | sting auth gitlab --hostname gitlab.example.com --with-token
+# Read the token from a file so it never lands in shell history:
+sting auth gitlab --hostname gitlab.example.com --with-token < token-file
 ```
 
 Client secrets are only relevant when you deliberately create a confidential application. For normal use (including the public gitlab.com app) you only need the Client ID.

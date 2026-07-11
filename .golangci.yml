@@ -8,6 +8,38 @@ linters:
     - unused
     - misspell
 
+  settings:
+    errcheck:
+      # In a CLI tool it is idiomatic (and expected) to ignore errors from
+      # fmt.Fprint* when writing human output to cmd.OutOrStdout()/Stderr.
+      # Almost all new output in the auth/init wizard falls into this category.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+
+    staticcheck:
+      # Same baseline golangci-lint applies by default (all stylecheck rules
+      # except the ST1000/ST1003/ST1016/ST1020/ST1021/ST1022 doc-comment/naming
+      # conventions it excludes out of the box), plus our own exclusion:
+      # ST1005 complains about capitalized or punctuated error strings, but we
+      # keep proper English + punctuation in user-facing CLI errors (e.g.
+      # multi-line guidance for OAuth App setup on GHES/self-hosted).
+      checks:
+        [
+          "all",
+          "-ST1000",
+          "-ST1003",
+          "-ST1005",
+          "-ST1016",
+          "-ST1020",
+          "-ST1021",
+          "-ST1022",
+        ]
+
 formatters:
   enable:
     - gofmt
@@ -19,22 +51,3 @@ run:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-
-linters-settings:
-  errcheck:
-    # In a CLI tool it is idiomatic (and expected) to ignore errors from
-    # fmt.Fprint* when writing human output to cmd.OutOrStdout()/Stderr.
-    # Almost all new output in the auth/init wizard falls into this category.
-    exclude-functions:
-      - fmt.Fprint
-      - fmt.Fprintf
-      - fmt.Fprintln
-      - fmt.Print
-      - fmt.Printf
-      - fmt.Println
-
-  staticcheck:
-    # ST1005 complains about capitalized or punctuated error strings.
-    # We keep proper English + punctuation in user-facing CLI errors
-    # (e.g. multi-line guidance for OAuth App setup on GHES/self-hosted).
-    checks: ["all", "-ST1005"]

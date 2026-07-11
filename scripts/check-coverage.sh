@@ -18,13 +18,6 @@ if [[ ! -f "$profile" ]]; then
   exit 1
 fi
 
-skip_pkg() {
-  local pkg="$1"
-  case "$pkg" in
-    *) return 1 ;;
-  esac
-}
-
 threshold_for_pkg() {
   local pkg="$1"
   case "$pkg" in
@@ -77,11 +70,6 @@ for row in "${coverage_rows[@]}"; do
   pct="$(awk '{print $2}' <<<"$row")"
   covered="$(awk '{print $3}' <<<"$row")"
   total="$(awk '{print $4}' <<<"$row")"
-
-  if skip_pkg "$pkg"; then
-    printf "  %-55s %6.2f%% (%s/%s) [skipped]\n" "$pkg" "$pct" "$covered" "$total"
-    continue
-  fi
 
   threshold="$(threshold_for_pkg "$pkg")"
 
