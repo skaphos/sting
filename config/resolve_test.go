@@ -117,6 +117,70 @@ func TestResolveGitLabSearchUnsupported(t *testing.T) {
 	}
 }
 
+// TestResolveRejectsGitHubIdentifierInjection covers the search-qualifier
+// injection fix: for GitHub, an author/org/repo that could break out of a
+// commit-search qualifier (embedded space or colon, or a smuggled qualifier)
+// must be rejected before it ever reaches the client.
+func TestResolveRejectsGitHubIdentifierInjection(t *testing.T) {
+	authors := []string{
+		"victim author:attacker", // smuggled second qualifier
+		"John Doe",               // bare space corrupts the query
+		"x org:secret-org",       // smuggled org qualifier
+		`victim"quote`,           // quote could break quoting
+	}
+	for _, author := range authors {
+		if _, err := Default().Resolve(Request{Author: author}, time.Now()); err == nil {
+			t.Errorf("Resolve(author=%q): want rejection, got nil error", author)
+		}
+	}
+
+	if _, err := Default().Resolve(Request{
+		Author: "x", Scope: "org", Org: "secret org:evil",
+	}, time.Now()); err == nil {
+		t.Error("Resolve(org with space/colon): want rejection")
+	}
+
+	if _, err := Default().Resolve(Request{
+		Author: "x", Scope: "repos", Repos: []string{"owner/repo bad:x"},
+	}, time.Now()); err == nil {
+		t.Error("Resolve(repo with space/colon): want rejection")
+	}
+}
+
+// TestResolveAcceptsValidGitHubAuthors confirms the validation does not reject
+// legitimate GitHub logins or emails, including the "Name <addr>" form.
+func TestResolveAcceptsValidGitHubAuthors(t *testing.T) {
+	authors := []string{
+		"mfacenet",
+		"octo-cat",
+		"user@example.com",
+		"Mended Link <mended@example.com>",
+	}
+	for _, author := range authors {
+		if _, err := Default().Resolve(Request{Author: author}, time.Now()); err != nil {
+			t.Errorf("Resolve(author=%q): want accepted, got %v", author, err)
+		}
+	}
+}
+
+// TestResolveGitLabSkipsGitHubValidation confirms GitLab values are not subject
+// to the GitHub charset: GitLab authors are free text and its client
+// URL-encodes them, so a spaced author must pass through unchanged.
+func TestResolveGitLabSkipsGitHubValidation(t *testing.T) {
+	q, err := Default().Resolve(Request{
+		Provider: "gitlab",
+		Author:   "John Doe",
+		Scope:    "repos",
+		Repos:    []string{"group/sub group/proj"},
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("Resolve(gitlab, spaced author/repo): %v", err)
+	}
+	if q.Author != "John Doe" {
+		t.Errorf("Author = %q, want John Doe", q.Author)
+	}
+}
+
 func TestResolveStatsOverride(t *testing.T) {
 	cfg := Default() // IncludeStats false
 	yes := true

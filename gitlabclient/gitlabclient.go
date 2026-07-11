@@ -21,6 +21,16 @@ import (
 
 const defaultBaseURL = "https://gitlab.com/api/v4/"
 
+// httpTimeout bounds each HTTP request so a hung connection cannot stall a scan.
+// It is per-request (each page), not for the whole Collect, which the caller
+// bounds via context.
+const httpTimeout = 30 * time.Second
+
+// maxPages bounds every pagination loop so a server that always advertises
+// another page cannot spin forever with unbounded memory. It is far above any
+// realistic page count for a single query.
+const maxPages = 10000
+
 // Client retrieves commits from GitLab for an author over a time window.
 type Client struct {
 	http    *http.Client
@@ -54,7 +64,10 @@ func New(token, baseURL string, perPage int) (*Client, error) {
 		perPage = 100
 	}
 	return &Client{
-		http:    http.DefaultClient,
+		// A dedicated client with a timeout, rather than the shared
+		// http.DefaultClient, so a stalled request cannot hang a scan and the
+		// global default client is never mutated.
+		http:    &http.Client{Timeout: httpTimeout},
 		baseURL: base,
 		token:   token,
 		perPage: perPage,
@@ -69,6 +82,14 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 	q.Until = until
 
+	// Fetch one commit past the cap so truncation can be distinguished from an
+	// exact fit: more than MaxCommits means evidence was dropped (Truncated);
+	// exactly MaxCommits means nothing was dropped and Truncated must stay false.
+	eq := q
+	if eq.MaxCommits > 0 {
+		eq.MaxCommits = q.MaxCommits + 1
+	}
+
 	var (
 		commits []model.Commit
 		skipped []model.SkippedRepo
@@ -76,9 +97,9 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	)
 	switch q.Scope {
 	case model.ScopeRepos:
-		commits, err = c.listRepos(ctx, q)
+		commits, err = c.listRepos(ctx, eq)
 	case model.ScopeOrg:
-		commits, skipped, err = c.listGroup(ctx, q)
+		commits, skipped, err = c.listGroup(ctx, eq)
 	case model.ScopeSearch:
 		return model.Result{}, fmt.Errorf("provider %q does not support scope %q (use repos or org)", model.ProviderGitLab, q.Scope)
 	default:
@@ -89,7 +110,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 
 	truncated := false
-	if q.MaxCommits > 0 && len(commits) >= q.MaxCommits {
+	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
 	}
@@ -172,6 +193,12 @@ func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, 
 
 func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel string, q model.Query) ([]model.Commit, error) {
 	values := url.Values{}
+	// Per-provider semantics: GitLab's commits API filters and reports the
+	// committed date via since/until and records author_name/author_email as the
+	// identity, whereas the GitHub paths filter and record the author date and
+	// login. Both are normalized into model.Commit.Date, so a window may include
+	// slightly different commits across providers when author and committer dates
+	// differ (e.g. rebased or cherry-picked commits).
 	values.Set("author", q.Author)
 	values.Set("since", q.Since.UTC().Format(time.RFC3339))
 	values.Set("until", q.Until.UTC().Format(time.RFC3339))
@@ -183,6 +210,9 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 	endpoint := "projects/" + url.PathEscape(project) + "/repository/commits"
 	var out []model.Commit
 	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list commits %s: exceeded max pages (%d)", repoLabel, maxPages)
+		}
 		values.Set("page", strconv.Itoa(page))
 		var commits []gitlabCommit
 		next, err := c.get(ctx, "list commits "+repoLabel, endpoint, values, &commits)
@@ -217,6 +247,9 @@ func (c *Client) groupProjects(ctx context.Context, group string) ([]gitlabProje
 	endpoint := "groups/" + url.PathEscape(strings.TrimSpace(group)) + "/projects"
 	var out []gitlabProject
 	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list group projects %s: exceeded max pages (%d)", group, maxPages)
+		}
 		values.Set("page", strconv.Itoa(page))
 		var projects []gitlabProject
 		next, err := c.get(ctx, "list group projects "+group, endpoint, values, &projects)
@@ -260,7 +293,12 @@ func (c *Client) get(ctx context.Context, op, endpoint string, values url.Values
 		if msg == "" {
 			msg = resp.Status
 		}
-		return "", &statusError{op: op, status: resp.StatusCode, msg: msg}
+		return "", &statusError{
+			op:         op,
+			status:     resp.StatusCode,
+			msg:        msg,
+			retryAfter: resp.Header.Get("Retry-After"),
+		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
 		return "", fmt.Errorf("%s: decode response: %w", op, err)
@@ -273,9 +311,10 @@ func (c *Client) get(ctx context.Context, op, endpoint string, values url.Values
 // failures and skip past them. Its message is unchanged from the prior inline
 // fmt.Errorf form, so callers that match on the text still work.
 type statusError struct {
-	op     string
-	status int
-	msg    string
+	op         string
+	status     int
+	msg        string
+	retryAfter string // Retry-After header, set on throttled responses
 }
 
 func (e *statusError) Error() string {
@@ -292,6 +331,13 @@ func (e *statusError) Error() string {
 func skipProjectReason(err error) (string, bool) {
 	var se *statusError
 	if !errors.As(err, &se) {
+		return "", false
+	}
+	// A throttled response carries a Retry-After header. GitLab normally signals
+	// rate limits with 429 (already fatal here), but mirror the GitHub client's
+	// care: if a skippable status ever arrives with Retry-After set, treat it as a
+	// global rate limit and abort rather than silently dropping the project.
+	if se.retryAfter != "" {
 		return "", false
 	}
 	switch se.status {
@@ -312,7 +358,6 @@ type gitlabProject struct {
 
 type gitlabCommit struct {
 	ID           string       `json:"id"`
-	ShortID      string       `json:"short_id"`
 	Title        string       `json:"title"`
 	Message      string       `json:"message"`
 	AuthorName   string       `json:"author_name"`
@@ -377,6 +422,9 @@ func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string,
 		budget = model.DefaultMaxDiffBytes
 	}
 	for page := 1; ; page++ {
+		if page > maxPages {
+			return fmt.Errorf("get commit diff %s@%s: exceeded max pages (%d)", repoLabel, cm.SHA, maxPages)
+		}
 		values.Set("page", strconv.Itoa(page))
 		var diffs []gitlabDiff
 		next, err := c.get(ctx, "get commit diff "+repoLabel+"@"+cm.SHA, endpoint, values, &diffs)

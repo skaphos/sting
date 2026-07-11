@@ -17,6 +17,16 @@ import (
 	"github.com/skaphos/sting/model"
 )
 
+// httpTimeout bounds each HTTP request the client makes so a hung connection
+// cannot stall a scan indefinitely. It is per-request (each page), not for the
+// whole Collect, which the caller bounds via context.
+const httpTimeout = 30 * time.Second
+
+// maxPages bounds every pagination loop so a server that always advertises
+// another page cannot spin forever with unbounded memory. It is far above any
+// realistic page count for a single query.
+const maxPages = 10000
+
 // apiError wraps a go-github error, giving rate-limit failures a clearer,
 // agent-actionable message (an MCP client can decide to back off) while
 // preserving the original error for errors.As/Is callers.
@@ -63,13 +73,39 @@ func skipRepoReason(err error) (string, bool) {
 			return "not found", true
 		case http.StatusGone: // 410: removed
 			return "gone", true
-		case http.StatusForbidden: // 403: access denied to this repo (rate limits handled above)
+		case http.StatusForbidden: // 403: access denied to this repo, OR a rate limit
+			// GitHub returns 403 for both a genuine per-repo permission denial and
+			// for primary/secondary rate limits, and go-github does not always map
+			// the latter to RateLimitError/AbuseRateLimitError. Treating a
+			// rate-limit 403 as a per-repo skip would silently drop repos and report
+			// a benign "access forbidden" reason, yielding a drastically incomplete
+			// evidence set, so classify it as fatal and let the caller abort.
+			if isRateLimited(er) {
+				return "", false
+			}
 			return "access forbidden", true
 		case http.StatusUnavailableForLegalReasons: // 451: withheld (e.g. DMCA)
 			return "unavailable for legal reasons", true
 		}
 	}
 	return "", false
+}
+
+// isRateLimited reports whether a 403 ErrorResponse is actually a rate limit
+// rather than a permission denial, by inspecting the response headers and
+// message that GitHub sets on throttled requests: a Retry-After (secondary
+// limit), an exhausted X-RateLimit-Remaining (primary limit), or a message that
+// names the (secondary) rate limit.
+func isRateLimited(er *github.ErrorResponse) bool {
+	if er.Response != nil {
+		if er.Response.Header.Get("Retry-After") != "" {
+			return true
+		}
+		if er.Response.Header.Get("X-RateLimit-Remaining") == "0" {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(er.Message), "rate limit")
 }
 
 // Client retrieves commits from GitHub for an author over a time window.
@@ -83,7 +119,11 @@ type Client struct {
 // the API root (e.g. "https://ghe.example.com/api/v3/"). perPage is clamped to
 // the API's 1-100 range.
 func New(token, baseURL string, perPage int) (*Client, error) {
-	gh := github.NewClient(nil)
+	// Use a client with an explicit timeout rather than http.DefaultClient (which
+	// go-github's nil default uses) so a stalled request cannot hang a scan and so
+	// the global default client is never mutated. WithAuthToken preserves the
+	// Timeout while wrapping only the transport.
+	gh := github.NewClient(&http.Client{Timeout: httpTimeout})
 	if token != "" {
 		gh = gh.WithAuthToken(token)
 	}
@@ -111,6 +151,15 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 	q.Until = until
 
+	// Fetch one commit past the cap so truncation can be distinguished from an
+	// exact fit: if the helpers return more than MaxCommits, evidence was dropped
+	// (Truncated); returning exactly MaxCommits means nothing was dropped and
+	// Truncated must stay false. The final clip below trims the extra probe commit.
+	eq := q
+	if eq.MaxCommits > 0 {
+		eq.MaxCommits = q.MaxCommits + 1
+	}
+
 	var (
 		commits []model.Commit
 		skipped []model.SkippedRepo
@@ -118,11 +167,11 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	)
 	switch q.Scope {
 	case model.ScopeSearch:
-		commits, err = c.searchByAuthor(ctx, q)
+		commits, err = c.searchByAuthor(ctx, eq)
 	case model.ScopeRepos:
-		commits, err = c.listRepos(ctx, q)
+		commits, err = c.listRepos(ctx, eq)
 	case model.ScopeOrg:
-		commits, skipped, err = c.listOrg(ctx, q)
+		commits, skipped, err = c.listOrg(ctx, eq)
 	default:
 		return model.Result{}, fmt.Errorf("unsupported scope %q", q.Scope)
 	}
@@ -130,10 +179,8 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		return model.Result{}, err
 	}
 
-	// The scope helpers stop fetching once they have MaxCommits, so reaching the
-	// cap means more commits may exist upstream; clip to the cap and flag it.
 	truncated := false
-	if q.MaxCommits > 0 && len(commits) >= q.MaxCommits {
+	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
 	}
@@ -162,7 +209,10 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 		ListOptions: github.ListOptions{PerPage: c.perPage},
 	}
 	var out []model.Commit
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("search commits: exceeded max pages (%d)", maxPages)
+		}
 		res, resp, err := c.gh.Search.Commits(ctx, query, opts)
 		if err != nil {
 			return nil, apiError("search commits", err)
@@ -302,7 +352,10 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 	}
 	full := owner + "/" + repo
 	var out []model.Commit
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list commits %s: exceeded max pages (%d)", full, maxPages)
+		}
 		commits, resp, err := c.gh.Repositories.ListCommits(ctx, owner, repo, opts)
 		if err != nil {
 			return nil, apiError("list commits "+full, err)
@@ -342,7 +395,10 @@ func (c *Client) pullRequestCommits(ctx context.Context, owner, repo string, q m
 		ListOptions: github.ListOptions{PerPage: c.perPage},
 	}
 	var out []model.Commit
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list pull requests %s: exceeded max pages (%d)", full, maxPages)
+		}
 		prs, resp, err := c.gh.PullRequests.List(ctx, owner, repo, prOpts)
 		if err != nil {
 			return nil, apiError("list pull requests "+full, err)
@@ -372,7 +428,10 @@ func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number
 	source := fmt.Sprintf("pull/%d", number)
 	opts := &github.ListOptions{PerPage: c.perPage}
 	var out []model.Commit
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list pr commits %s#%d: exceeded max pages (%d)", full, number, maxPages)
+		}
 		commits, resp, err := c.gh.PullRequests.ListCommits(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, apiError(fmt.Sprintf("list pr commits %s#%d", full, number), err)
@@ -450,7 +509,10 @@ func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
 		ListOptions: github.ListOptions{PerPage: c.perPage},
 	}
 	var out []string
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("list org repos %s: exceeded max pages (%d)", org, maxPages)
+		}
 		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, org, opts)
 		if err != nil {
 			return nil, apiError("list org repos "+org, err)
@@ -474,7 +536,10 @@ func (c *Client) fillDetails(ctx context.Context, owner, repo string, cm *model.
 	opts := &github.ListOptions{PerPage: c.perPage}
 	var files []*github.CommitFile
 	needFiles := q.IncludeFiles || q.IncludeDiffs
-	for {
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return fmt.Errorf("get commit details %s/%s@%s: exceeded max pages (%d)", owner, repo, cm.SHA, maxPages)
+		}
 		rc, resp, err := c.gh.Repositories.GetCommit(ctx, owner, repo, cm.SHA, opts)
 		if err != nil {
 			return apiError(fmt.Sprintf("get commit details %s/%s@%s", owner, repo, cm.SHA), err)
@@ -532,21 +597,66 @@ func githubFiles(files []*github.CommitFile, q model.Query) []model.File {
 // qualifier rather than one with spaces/angle brackets.
 func authorQualifier(author string) string {
 	if email, ok := authorEmail(author); ok {
-		return "author-email:" + email
+		return "author-email:" + searchQualifierValue(email)
 	}
-	return "author:" + author
+	return "author:" + searchQualifierValue(author)
+}
+
+// searchQualifierValue renders v as a GitHub commit-search qualifier value that
+// cannot break out of its qualifier. Values made up only of safe identifier
+// characters are emitted verbatim; anything containing a space, colon, quote, or
+// other structural character is wrapped in double quotes with embedded
+// backslashes and quotes escaped (GitHub's quoted-qualifier syntax). This is
+// the defense-in-depth counterpart to config.Resolve's validation: it prevents
+// an author of "victim author:attacker" from injecting a second qualifier, and
+// matches the injection-safety the GitLab client gets for free from
+// URL-encoding.
+func searchQualifierValue(v string) string {
+	if safeQualifierValue(v) {
+		return v
+	}
+	var b strings.Builder
+	b.Grow(len(v) + 2)
+	b.WriteByte('"')
+	for _, r := range v {
+		if r == '\\' || r == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func safeQualifierValue(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '/', r == '@', r == '+':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func buildSearchQuery(q model.Query) string {
 	parts := []string{authorQualifier(q.Author)}
 	if !q.Since.IsZero() || !q.Until.IsZero() {
+		// Emit full RFC3339 timestamps rather than whole-day dates so the search
+		// scope filters at the same second precision as the repos, PR, and GitLab
+		// paths; otherwise the same window returns materially different evidence
+		// under scope=search vs scope=repos.
 		since := "*"
 		if !q.Since.IsZero() {
-			since = q.Since.UTC().Format("2006-01-02")
+			since = q.Since.UTC().Format(time.RFC3339)
 		}
 		until := "*"
 		if !q.Until.IsZero() {
-			until = q.Until.UTC().Format("2006-01-02")
+			until = q.Until.UTC().Format(time.RFC3339)
 		}
 		parts = append(parts, fmt.Sprintf("author-date:%s..%s", since, until))
 	}
@@ -554,11 +664,11 @@ func buildSearchQuery(q model.Query) string {
 	// adding org:/repo: qualifiers is what lets the search index reach private
 	// repos the authenticated token can access (e.g. an SSO-authorized org).
 	if q.Org != "" {
-		parts = append(parts, "org:"+q.Org)
+		parts = append(parts, "org:"+searchQualifierValue(q.Org))
 	}
 	for _, repo := range q.Repos {
 		if r := strings.TrimSpace(repo); r != "" {
-			parts = append(parts, "repo:"+r)
+			parts = append(parts, "repo:"+searchQualifierValue(r))
 		}
 	}
 	return strings.Join(parts, " ")

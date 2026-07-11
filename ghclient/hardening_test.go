@@ -71,6 +71,166 @@ func TestSkipRepoReason(t *testing.T) {
 	}
 }
 
+// TestSkipRepoReasonRateLimit403 verifies that a 403 carrying rate-limit
+// signals is classified as fatal (so an org scan aborts) rather than skipped as
+// a benign per-repo permission denial, even when go-github surfaces it as a
+// plain ErrorResponse rather than a RateLimitError/AbuseRateLimitError.
+func TestSkipRepoReasonRateLimit403(t *testing.T) {
+	forbidden := func(h http.Header, msg string) error {
+		return apiError("op", &github.ErrorResponse{
+			Response: &http.Response{StatusCode: http.StatusForbidden, Header: h},
+			Message:  msg,
+		})
+	}
+	retryAfter := http.Header{}
+	retryAfter.Set("Retry-After", "60")
+	exhausted := http.Header{}
+	exhausted.Set("X-RateLimit-Remaining", "0")
+
+	cases := []struct {
+		name   string
+		err    error
+		reason string
+		skip   bool
+	}{
+		{"secondary limit via Retry-After", forbidden(retryAfter, "slow down"), "", false},
+		{"primary limit via X-RateLimit-Remaining", forbidden(exhausted, "api rate limit"), "", false},
+		{"secondary limit via message", forbidden(http.Header{}, "You have exceeded a secondary rate limit"), "", false},
+		{"genuine permission denial", forbidden(http.Header{}, "Must have push access to view repository collaborators"), "access forbidden", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, skip := skipRepoReason(tc.err)
+			if skip != tc.skip || reason != tc.reason {
+				t.Errorf("skipRepoReason = (%q, %v), want (%q, %v)", reason, skip, tc.reason, tc.skip)
+			}
+		})
+	}
+}
+
+// TestCollectScopeOrgRateLimit403Aborts verifies end to end that a
+// secondary-rate-limit 403 during an org scan aborts the whole scan rather than
+// being recorded as a per-repo skip, which would silently drop repos.
+func TestCollectScopeOrgRateLimit403Aborts(t *testing.T) {
+	const twoRepos = `[{"full_name":"skaphos/limited"},{"full_name":"skaphos/sting"}]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/orgs/skaphos/repos"):
+			_, _ = w.Write([]byte(twoRepos))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/limited/commits"):
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, `{"message":"You have exceeded a secondary rate limit"}`, http.StatusForbidden)
+		default:
+			t.Errorf("unexpected path %q (scan should abort before reaching it)", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := New("", srv.URL+"/", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat", Scope: model.ScopeOrg, Org: "skaphos",
+	}); err == nil {
+		t.Fatal("Collect: want abort on secondary rate-limit 403; must not be skipped per repo")
+	}
+}
+
+// TestCollectScopeOrgPermission403Skips verifies the counterpart: a genuine
+// permission 403 (no rate-limit signals) is still skipped so one inaccessible
+// repo does not abort the scan.
+func TestCollectScopeOrgPermission403Skips(t *testing.T) {
+	const twoRepos = `[{"full_name":"skaphos/private"},{"full_name":"skaphos/sting"}]`
+	const commits = `[{"sha":"z1","html_url":"u","commit":{"message":"m","author":{"name":"A","date":"2026-05-29T00:00:00Z"}}}]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/orgs/skaphos/repos"):
+			_, _ = w.Write([]byte(twoRepos))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/private/commits"):
+			http.Error(w, `{"message":"Must have push access to view repository collaborators."}`, http.StatusForbidden)
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(commits))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := New("", srv.URL+"/", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Collect(context.Background(), model.Query{
+		Author: "octocat", Scope: model.ScopeOrg, Org: "skaphos",
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v (permission 403 must be skipped, not fatal)", err)
+	}
+	if res.Count != 1 || len(res.Skipped) != 1 {
+		t.Fatalf("Count = %d, Skipped = %+v, want 1 commit and 1 skip", res.Count, res.Skipped)
+	}
+	if res.Skipped[0].Repo != "skaphos/private" || res.Skipped[0].Reason != "access forbidden" {
+		t.Errorf("Skipped[0] = %+v, want {skaphos/private access forbidden}", res.Skipped[0])
+	}
+}
+
+// TestSearchReposWindowParity verifies the search scope filters the commit
+// window at the same second precision as the repos scope: the search qualifier
+// must carry full RFC3339 timestamps, matching the since/until the repos path
+// sends, so the two scopes cannot return materially different evidence for a
+// sub-day window.
+func TestSearchReposWindowParity(t *testing.T) {
+	since := time.Date(2026, 5, 22, 9, 30, 0, 0, time.UTC)
+	until := time.Date(2026, 5, 22, 17, 45, 0, 0, time.UTC)
+
+	var searchQ, repoSince, repoUntil string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "search/commits"):
+			searchQ = r.URL.Query().Get("q")
+			_, _ = w.Write([]byte(`{"total_count":0,"incomplete_results":false,"items":[]}`))
+		case strings.Contains(r.URL.Path, "/repos/o/r/commits"):
+			repoSince = r.URL.Query().Get("since")
+			repoUntil = r.URL.Query().Get("until")
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := New("", srv.URL+"/", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sq := model.Query{Author: "octocat", Scope: model.ScopeSearch, Since: since, Until: until}
+	if _, err := c.Collect(context.Background(), sq); err != nil {
+		t.Fatalf("search Collect: %v", err)
+	}
+	rq := model.Query{Author: "octocat", Scope: model.ScopeRepos, Repos: []string{"o/r"}, Since: since, Until: until}
+	if _, err := c.Collect(context.Background(), rq); err != nil {
+		t.Fatalf("repos Collect: %v", err)
+	}
+
+	wantSince := since.UTC().Format(time.RFC3339)
+	wantUntil := until.UTC().Format(time.RFC3339)
+	wantQualifier := "author-date:" + wantSince + ".." + wantUntil
+	if !strings.Contains(searchQ, wantQualifier) {
+		t.Errorf("search q = %q, want it to contain %q (sub-day precision, not whole days)", searchQ, wantQualifier)
+	}
+	if repoSince != wantSince || repoUntil != wantUntil {
+		t.Errorf("repos since/until = %q/%q, want %q/%q", repoSince, repoUntil, wantSince, wantUntil)
+	}
+}
+
 // TestCollectReposMaxCommits verifies the repo scope stops at MaxCommits and
 // reports truncation rather than fetching every page first.
 func TestCollectReposMaxCommits(t *testing.T) {

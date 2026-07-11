@@ -13,7 +13,7 @@ func TestBuildSearchQuery(t *testing.T) {
 	until := time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC)
 
 	got := buildSearchQuery(model.Query{Author: "mfacenet", Since: since, Until: until})
-	want := "author:mfacenet author-date:2026-05-22..2026-05-29"
+	want := "author:mfacenet author-date:2026-05-22T00:00:00Z..2026-05-29T00:00:00Z"
 	if got != want {
 		t.Errorf("buildSearchQuery = %q, want %q", got, want)
 	}
@@ -78,6 +78,39 @@ func TestAuthorMatches(t *testing.T) {
 		if got := authorMatches(cm, c.author); got != c.want {
 			t.Errorf("authorMatches(%q) = %v, want %v", c.author, got, c.want)
 		}
+	}
+}
+
+// TestSearchQualifierValueEscaping covers the defense-in-depth quoting in the
+// client: safe identifier values pass through verbatim, while anything that
+// could break out of a qualifier is double-quoted with quotes and backslashes
+// escaped.
+func TestSearchQualifierValueEscaping(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"octocat", "octocat"},
+		{"user@example.com", "user@example.com"},
+		{"skaphos/sting", "skaphos/sting"},
+		{"user+tag@example.com", "user+tag@example.com"},
+		{"victim author:attacker", `"victim author:attacker"`},
+		{"John Doe", `"John Doe"`},
+		{`quote"inside`, `"quote\"inside"`},
+		{`back\slash`, `"back\\slash"`},
+	}
+	for _, tt := range tests {
+		if got := searchQualifierValue(tt.in); got != tt.want {
+			t.Errorf("searchQualifierValue(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestBuildSearchQueryQuotesInjection verifies that even if an unsafe value
+// reaches buildSearchQuery (config.Resolve would normally reject it first), it
+// is quoted so it cannot inject a second qualifier.
+func TestBuildSearchQueryQuotesInjection(t *testing.T) {
+	got := buildSearchQuery(model.Query{Author: "victim author:attacker"})
+	want := `author:"victim author:attacker"`
+	if got != want {
+		t.Errorf("buildSearchQuery = %q, want %q", got, want)
 	}
 }
 

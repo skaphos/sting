@@ -30,16 +30,14 @@ func TestNewSelectsProvider(t *testing.T) {
 	}
 }
 
-func TestNewUsesDefaultProvider(t *testing.T) {
-	cfg := config.Default()
-	cfg.DefaultProvider = model.ProviderGitLab
-
-	client, err := New(cfg, "")
-	if err != nil {
-		t.Fatalf("New(default gitlab): %v", err)
-	}
-	if _, ok := client.(*gitlabclient.Client); !ok {
-		t.Fatalf("New(default gitlab) = %T, want *gitlabclient.Client", client)
+// TestNewRejectsEmptyProvider documents that New no longer defaults an empty
+// provider: provider defaulting (empty->default->github) is centralized in
+// config.Resolve, and New expects an already-resolved value. The switch's
+// default branch guards against an empty or unknown provider rather than
+// silently returning a nil client.
+func TestNewRejectsEmptyProvider(t *testing.T) {
+	if _, err := New(config.Default(), ""); err == nil {
+		t.Fatal("New(empty provider): want error; defaulting lives in config.Resolve")
 	}
 }
 
