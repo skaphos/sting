@@ -4,6 +4,13 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7](https://github.com/skaphos/sting/compare/v0.0.6...v0.0.7) (2026-07-12)
+
+
+### Performance Improvements
+
+* **clients:** bound routine queries by default ([#37](https://github.com/skaphos/sting/issues/37)) ([4affd0b](https://github.com/skaphos/sting/commit/4affd0b18300d0edce413c332719198024232669))
+
 ## [0.0.6](https://github.com/skaphos/sting/compare/v0.0.5...v0.0.6) (2026-07-11)
 
 
