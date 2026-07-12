@@ -195,6 +195,48 @@ func TestCollectScopeOrg(t *testing.T) {
 	}
 }
 
+func TestCollectScopeOrgStopsProjectPaginationAtMaxCommits(t *testing.T) {
+	const twoCommits = `[
+		{"id":"one","message":"first","authored_date":"2026-05-21T11:00:00Z"},
+		{"id":"two","message":"second","authored_date":"2026-05-21T12:00:00Z"}
+	]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch path := r.URL.EscapedPath(); {
+		case strings.Contains(path, "/groups/skaphos/projects"):
+			if r.URL.Query().Get("page") == "2" {
+				t.Errorf("group project pagination should stop once MaxCommits is reached")
+			}
+			w.Header().Set("X-Next-Page", "2")
+			_, _ = w.Write([]byte(`[{"id":42,"path_with_namespace":"skaphos/sting"}]`))
+		case strings.Contains(path, "/projects/42/repository/commits"):
+			_, _ = w.Write([]byte(twoCommits))
+		default:
+			t.Errorf("unexpected path %q", path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:     "octocat",
+		Scope:      model.ScopeOrg,
+		Org:        "skaphos",
+		MaxCommits: 1,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 1 {
+		t.Fatalf("Count = %d, want 1", res.Count)
+	}
+	if !res.Truncated {
+		t.Error("Truncated = false, want true")
+	}
+}
+
 // TestCollectScopeOrgSkipsBadProject verifies a group scan records a per-project
 // failure (here a 404) in Result.Skipped and continues to the healthy project
 // instead of aborting the whole scan.

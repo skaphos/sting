@@ -226,7 +226,7 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 	opts := &github.SearchOptions{
 		Sort:        "author-date",
 		Order:       "desc",
-		ListOptions: github.ListOptions{PerPage: c.perPage},
+		ListOptions: github.ListOptions{PerPage: c.resultPageSize(q.MaxCommits)},
 	}
 	var out []model.Commit
 	for page := 1; ; page++ {
@@ -265,7 +265,11 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 		if !ok {
 			return nil, fmt.Errorf("invalid repo %q (want owner/repo)", target)
 		}
-		commits, err := c.collectRepo(ctx, owner, repo, q)
+		repoQuery := remainingQuery(q, len(out))
+		if repoQuery.MaxCommits == 0 && q.MaxCommits > 0 {
+			return out, nil
+		}
+		commits, err := c.collectRepo(ctx, owner, repo, repoQuery)
 		if err != nil {
 			return nil, err
 		}
@@ -287,31 +291,48 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, []
 	if q.Org == "" {
 		return nil, nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
 	}
-	repos, err := c.orgRepos(ctx, q.Org)
-	if err != nil {
-		return nil, nil, err
+	opts := &github.RepositoryListByOrgOptions{
+		ListOptions: github.ListOptions{PerPage: c.perPage},
 	}
 	var (
 		out     []model.Commit
 		skipped []model.SkippedRepo
 	)
-	for _, full := range repos {
-		owner, repo, ok := splitRepo(full)
-		if !ok {
-			continue
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, nil, fmt.Errorf("list org repos %s: exceeded max pages (%d)", q.Org, maxPages)
 		}
-		commits, err := c.collectRepo(ctx, owner, repo, q)
+		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, q.Org, opts)
 		if err != nil {
-			if reason, skip := skipRepoReason(err); skip {
-				skipped = append(skipped, model.SkippedRepo{Repo: full, Reason: reason})
+			return nil, nil, apiError("list org repos "+q.Org, err)
+		}
+		for _, r := range repos {
+			full := r.GetFullName()
+			owner, repo, ok := splitRepo(full)
+			if !ok {
 				continue
 			}
-			return nil, nil, err
+			repoQuery := remainingQuery(q, len(out))
+			if repoQuery.MaxCommits == 0 && q.MaxCommits > 0 {
+				return out, skipped, nil
+			}
+			commits, err := c.collectRepo(ctx, owner, repo, repoQuery)
+			if err != nil {
+				if reason, skip := skipRepoReason(err); skip {
+					skipped = append(skipped, model.SkippedRepo{Repo: full, Reason: reason})
+					continue
+				}
+				return nil, nil, err
+			}
+			out = append(out, commits...)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				return out, skipped, nil
+			}
 		}
-		out = append(out, commits...)
-		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+		if resp.NextPage == 0 {
 			break
 		}
+		opts.Page = resp.NextPage
 	}
 	return out, skipped, nil
 }
@@ -358,7 +379,7 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 		Author:      q.Author,
 		Since:       q.Since,
 		Until:       q.Until,
-		ListOptions: github.ListOptions{PerPage: c.perPage},
+		ListOptions: github.ListOptions{PerPage: c.resultPageSize(q.MaxCommits)},
 	}
 	full := owner + "/" + repo
 	var out []model.Commit
@@ -431,7 +452,7 @@ func (c *Client) pullRequestCommits(ctx context.Context, owner, repo string, q m
 func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number int, q model.Query, seen map[string]bool) ([]model.Commit, error) {
 	full := owner + "/" + repo
 	source := fmt.Sprintf("pull/%d", number)
-	opts := &github.ListOptions{PerPage: c.perPage}
+	opts := &github.ListOptions{PerPage: c.resultPageSize(q.MaxCommits)}
 	var out []model.Commit
 	for page := 1; ; page++ {
 		if page > maxPages {
@@ -504,32 +525,27 @@ func inWindow(t, since, until time.Time) bool {
 	return true
 }
 
-func (c *Client) orgRepos(ctx context.Context, org string) ([]string, error) {
-	opts := &github.RepositoryListByOrgOptions{
-		ListOptions: github.ListOptions{PerPage: c.perPage},
-	}
-	var out []string
-	for page := 1; ; page++ {
-		if page > maxPages {
-			return nil, fmt.Errorf("list org repos %s: exceeded max pages (%d)", org, maxPages)
-		}
-		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, org, opts)
-		if err != nil {
-			return nil, apiError("list org repos "+org, err)
-		}
-		for _, r := range repos {
-			out = append(out, r.GetFullName())
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-	return out, nil
-}
-
 func needsDetail(q model.Query) bool {
 	return q.IncludeStats || q.IncludeFiles || q.IncludeDiffs
+}
+
+func (c *Client) resultPageSize(maxCommits int) int {
+	if maxCommits > 0 && maxCommits < c.perPage {
+		return maxCommits
+	}
+	return c.perPage
+}
+
+func remainingQuery(q model.Query, have int) model.Query {
+	if q.MaxCommits <= 0 {
+		return q
+	}
+	remaining := q.MaxCommits - have
+	if remaining < 0 {
+		remaining = 0
+	}
+	q.MaxCommits = remaining
+	return q
 }
 
 // enrichDetails fills each commit's stats/files/diffs concurrently, bounded by

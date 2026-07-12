@@ -207,6 +207,48 @@ func TestCollectScopeOrg(t *testing.T) {
 	}
 }
 
+func TestCollectScopeOrgStopsRepoPaginationAtMaxCommits(t *testing.T) {
+	const firstPage = `[{"full_name":"skaphos/sting"}]`
+	const twoCommits = `[
+		{"sha":"one","commit":{"message":"first","author":{"date":"2026-05-21T11:00:00Z"}}},
+		{"sha":"two","commit":{"message":"second","author":{"date":"2026-05-21T12:00:00Z"}}}
+	]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/orgs/skaphos/repos"):
+			if r.URL.Query().Get("page") == "2" {
+				t.Errorf("org repo pagination should stop once MaxCommits is reached")
+			}
+			w.Header().Set("Link", `<https://api.github.test/orgs/skaphos/repos?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(firstPage))
+		case strings.Contains(r.URL.Path, "/repos/skaphos/sting/commits"):
+			_, _ = w.Write([]byte(twoCommits))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, 50)
+	res, err := c.Collect(context.Background(), model.Query{
+		Author:     "octocat",
+		Scope:      model.ScopeOrg,
+		Org:        "skaphos",
+		MaxCommits: 1,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if res.Count != 1 {
+		t.Fatalf("Count = %d, want 1", res.Count)
+	}
+	if !res.Truncated {
+		t.Error("Truncated = false, want true")
+	}
+}
+
 // TestCollectScopeOrgSkipsBadRepo verifies that an org scan does not abort when
 // one repo cannot be listed (here an empty repo returning 409): the bad repo is
 // recorded in Result.Skipped and enumeration continues to the healthy repo.

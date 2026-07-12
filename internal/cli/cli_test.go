@@ -797,6 +797,9 @@ func TestLoadConfigValid(t *testing.T) {
 	if cfg.PerPage != 100 {
 		t.Errorf("PerPage = %d, want 100", cfg.PerPage)
 	}
+	if cfg.MaxCommits != config.DefaultMaxCommits {
+		t.Errorf("MaxCommits = %d, want %d", cfg.MaxCommits, config.DefaultMaxCommits)
+	}
 }
 
 // --- Execute / initConfig / must ---

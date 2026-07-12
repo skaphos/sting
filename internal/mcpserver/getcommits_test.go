@@ -123,6 +123,94 @@ func TestGetCommitsSuccess(t *testing.T) {
 	}
 }
 
+func TestGetCommitsMaxCommitsOverride(t *testing.T) {
+	const payload = `{
+		"total_count": 2,
+		"incomplete_results": false,
+		"items": [
+			{
+				"sha": "one",
+				"repository": {"full_name": "skaphos/sting"},
+				"commit": {"message": "first", "author": {"date": "2026-05-29T12:00:00Z"}}
+			},
+			{
+				"sha": "two",
+				"repository": {"full_name": "skaphos/sting"},
+				"commit": {"message": "second", "author": {"date": "2026-05-29T13:00:00Z"}}
+			}
+		]
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/search/commits") {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	h := newTestHandler(t, srv)
+	maxCommits := 1
+	res, mr, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author:     "mfacenet",
+		Scope:      "search",
+		MaxCommits: &maxCommits,
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected non-error result, got %+v", res)
+	}
+	if mr.Count != 1 {
+		t.Fatalf("Count = %d, want 1", mr.Count)
+	}
+	if !mr.Truncated {
+		t.Error("Truncated = false, want true")
+	}
+}
+
+func TestGetCommitsDefaultsDiffsOff(t *testing.T) {
+	orig := collectCommits
+	t.Cleanup(func() { collectCommits = orig })
+
+	var gotQuery model.Query
+	collectCommits = func(_ context.Context, _ config.Config, q model.Query) (model.Result, error) {
+		gotQuery = q
+		return model.Result{Author: q.Author}, nil
+	}
+
+	cfg := config.Default()
+	cfg.IncludeDiffs = true
+	h := &handler{cfg: cfg}
+
+	_, _, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author: "mfacenet",
+		Scope:  "search",
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if gotQuery.IncludeDiffs {
+		t.Error("omitted include_diffs should override the server default with false")
+	}
+
+	on := true
+	_, _, err = h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author:       "mfacenet",
+		Scope:        "search",
+		IncludeDiffs: &on,
+	})
+	if err != nil {
+		t.Fatalf("getCommits returned error: %v", err)
+	}
+	if !gotQuery.IncludeDiffs || !gotQuery.IncludeFiles {
+		t.Errorf("include_diffs=true should enable diffs and files, got %+v", gotQuery)
+	}
+}
+
 // TestGetCommitsIncludePRs covers the include_prs input branch: with the flag
 // set on a repos-scope query, the handler discovers a commit on an open PR
 // branch in addition to the default-branch commit.

@@ -116,3 +116,11 @@ func TestValidateGitLabSearchScopeIncompatible(t *testing.T) {
 		t.Errorf("Validate: unexpected error for provider=gitlab, default_scope=repos: %v", err)
 	}
 }
+
+func TestValidateMaxCommits(t *testing.T) {
+	cfg := Default()
+	cfg.MaxCommits = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate: want error for negative max commits")
+	}
+}

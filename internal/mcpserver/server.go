@@ -18,10 +18,10 @@ import (
 // GetCommitsInput is the argument schema for the get_commits tool. The
 // jsonschema descriptions are surfaced to the calling agent.
 //
-// The Include* flags are *bool (rather than bool) so that an explicit
-// "false" from the client is distinguishable from an omitted field: with a
-// plain bool, both encode as the zero value and a client could never turn
-// off a flag the server config enables by default.
+// The Include* flags are *bool (rather than bool) so that an explicit "false"
+// from the client is distinguishable from an omitted field. Most omitted flags
+// inherit server config; IncludeDiffs is the deliberate exception and defaults
+// to false for MCP calls because of its API and output cost.
 type GetCommitsInput struct {
 	Provider     string   `json:"provider,omitempty" jsonschema:"source control provider: github (default) or gitlab"`
 	Author       string   `json:"author" jsonschema:"provider username or author string whose commits to retrieve"`
@@ -33,8 +33,9 @@ type GetCommitsInput struct {
 	Org          string   `json:"org,omitempty" jsonschema:"organization or GitLab group; required for scope=org, and scopes GitHub scope=search into that org (reaches private repos the token can access)"`
 	IncludeStats *bool    `json:"include_stats,omitempty" jsonschema:"fetch per-commit line additions/deletions; GitHub uses extra API calls, GitLab uses commit-list stats"`
 	IncludeFiles *bool    `json:"include_files,omitempty" jsonschema:"fetch per-file change summaries; uses extra commit-detail API calls"`
-	IncludeDiffs *bool    `json:"include_diffs,omitempty" jsonschema:"fetch bounded patch text for changed files; implies include_files and can be token-heavy"`
+	IncludeDiffs *bool    `json:"include_diffs,omitempty" jsonschema:"opt in to bounded patch text for changed files; defaults to false, implies include_files, and uses extra API calls and tokens"`
 	MaxDiffBytes int      `json:"max_diff_bytes,omitempty" jsonschema:"per-commit patch byte cap when include_diffs is true; defaults to server config"`
+	MaxCommits   *int     `json:"max_commits,omitempty" jsonschema:"cap returned commits for this call; defaults to server config, set 0 only for an intentional exhaustive scan"`
 	IncludePRs   *bool    `json:"include_prs,omitempty" jsonschema:"also discover commits on open pull-request branches (scope=repos or org, GitHub only); finds unmerged work that commit search and branch listing miss, at the cost of extra API calls"`
 }
 
@@ -127,11 +128,18 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 	if in.IncludeFiles != nil {
 		req.IncludeFiles = in.IncludeFiles
 	}
+	// Diffs are intentionally opt-in for MCP calls, independent of server config,
+	// because they add provider requests and can substantially increase output.
+	includeDiffs := false
 	if in.IncludeDiffs != nil {
-		req.IncludeDiffs = in.IncludeDiffs
+		includeDiffs = *in.IncludeDiffs
 	}
+	req.IncludeDiffs = &includeDiffs
 	if in.MaxDiffBytes != 0 {
 		req.MaxDiffBytes = &in.MaxDiffBytes
+	}
+	if in.MaxCommits != nil {
+		req.MaxCommits = in.MaxCommits
 	}
 	if in.IncludePRs != nil {
 		req.IncludePullRequests = in.IncludePRs

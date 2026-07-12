@@ -34,7 +34,7 @@ default_org: ""              # org/group used by scope=org
 default_format: markdown     # markdown | json
 
 per_page: 100                # API page size (1-100)
-max_commits: 0               # cap on returned commits (0 = unlimited)
+max_commits: 100             # cap on returned commits (0 = unlimited)
 include_stats: false         # fetch per-commit additions/deletions
 include_files: false         # fetch per-file change summaries
 include_diffs: false         # fetch bounded patch text; implies include_files

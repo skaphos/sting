@@ -25,6 +25,9 @@ func TestResolveDefaults(t *testing.T) {
 	if q.Scope != model.ScopeSearch {
 		t.Errorf("scope = %q, want default search", q.Scope)
 	}
+	if q.MaxCommits != DefaultMaxCommits {
+		t.Errorf("MaxCommits = %d, want default %d", q.MaxCommits, DefaultMaxCommits)
+	}
 	if !q.Until.Equal(now) {
 		t.Errorf("until = %v, want now %v", q.Until, now)
 	}
@@ -213,5 +216,22 @@ func TestResolveDiffsImplyFiles(t *testing.T) {
 	}
 	if q.MaxDiffBytes != 1234 {
 		t.Errorf("MaxDiffBytes = %d, want 1234", q.MaxDiffBytes)
+	}
+}
+
+func TestResolveMaxCommitsOverride(t *testing.T) {
+	cfg := Default()
+	max := 0
+	q, err := cfg.Resolve(Request{Author: "x", MaxCommits: &max}, time.Now())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if q.MaxCommits != 0 {
+		t.Errorf("MaxCommits = %d, want explicit unlimited 0", q.MaxCommits)
+	}
+
+	negative := -1
+	if _, err := cfg.Resolve(Request{Author: "x", MaxCommits: &negative}, time.Now()); err == nil {
+		t.Fatal("Resolve: want error for negative max commits")
 	}
 }
