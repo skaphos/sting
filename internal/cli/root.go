@@ -49,7 +49,7 @@ func init() {
 	pf.String("gitlab-token", "", "GitLab personal access token (overrides config/env)")
 	pf.String("gitlab-base-url", "", "GitLab API v4 base URL")
 	pf.Int("per-page", 100, "API page size (1-100)")
-	pf.Int("max-commits", 0, "cap on returned commits (0 = unlimited)")
+	pf.Int("max-commits", config.DefaultMaxCommits, "cap on returned commits (0 = unlimited)")
 
 	// Bind the config-bearing persistent flags to their viper keys so flags win
 	// over env and file when set.

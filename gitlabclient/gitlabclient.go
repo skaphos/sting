@@ -159,7 +159,11 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 		if project == "" {
 			return nil, fmt.Errorf("invalid repo %q", target)
 		}
-		commits, err := c.listProjectCommits(ctx, project, project, q)
+		projectQuery := remainingQuery(q, len(out))
+		if projectQuery.MaxCommits == 0 && q.MaxCommits > 0 {
+			return out, nil
+		}
+		commits, err := c.listProjectCommits(ctx, project, project, projectQuery)
 		if err != nil {
 			return nil, err
 		}
@@ -180,30 +184,50 @@ func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, 
 	if strings.TrimSpace(q.Org) == "" {
 		return nil, nil, fmt.Errorf("scope %q requires an org", model.ScopeOrg)
 	}
-	projects, err := c.groupProjects(ctx, q.Org)
-	if err != nil {
-		return nil, nil, err
-	}
 	var (
 		out     []model.Commit
 		skipped []model.SkippedRepo
 	)
-	for _, project := range projects {
-		target := strconv.FormatInt(project.ID, 10)
-		label := project.PathWithNamespace
-		if label == "" {
-			label = target
+	values := url.Values{}
+	values.Set("include_subgroups", "true")
+	values.Set("simple", "true")
+	values.Set("per_page", strconv.Itoa(c.perPage))
+
+	endpoint := "groups/" + url.PathEscape(strings.TrimSpace(q.Org)) + "/projects"
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, nil, fmt.Errorf("list group projects %s: exceeded max pages (%d)", q.Org, maxPages)
 		}
-		commits, err := c.listProjectCommits(ctx, target, label, q)
+		values.Set("page", strconv.Itoa(page))
+		var projects []gitlabProject
+		next, err := c.get(ctx, "list group projects "+q.Org, endpoint, values, &projects)
 		if err != nil {
-			if reason, skip := skipProjectReason(err); skip {
-				skipped = append(skipped, model.SkippedRepo{Repo: label, Reason: reason})
-				continue
-			}
 			return nil, nil, err
 		}
-		out = append(out, commits...)
-		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+		for _, project := range projects {
+			target := strconv.FormatInt(project.ID, 10)
+			label := project.PathWithNamespace
+			if label == "" {
+				label = target
+			}
+			projectQuery := remainingQuery(q, len(out))
+			if projectQuery.MaxCommits == 0 && q.MaxCommits > 0 {
+				return out, skipped, nil
+			}
+			commits, err := c.listProjectCommits(ctx, target, label, projectQuery)
+			if err != nil {
+				if reason, skip := skipProjectReason(err); skip {
+					skipped = append(skipped, model.SkippedRepo{Repo: label, Reason: reason})
+					continue
+				}
+				return nil, nil, err
+			}
+			out = append(out, commits...)
+			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+				return out, skipped, nil
+			}
+		}
+		if next == "" {
 			break
 		}
 	}
@@ -221,7 +245,7 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 	values.Set("author", q.Author)
 	values.Set("since", q.Since.UTC().Format(time.RFC3339))
 	values.Set("until", q.Until.UTC().Format(time.RFC3339))
-	values.Set("per_page", strconv.Itoa(c.perPage))
+	values.Set("per_page", strconv.Itoa(c.resultPageSize(q.MaxCommits)))
 	if q.IncludeStats {
 		values.Set("with_stats", "true")
 	}
@@ -244,32 +268,6 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 				return out, nil
 			}
 		}
-		if next == "" {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (c *Client) groupProjects(ctx context.Context, group string) ([]gitlabProject, error) {
-	values := url.Values{}
-	values.Set("include_subgroups", "true")
-	values.Set("simple", "true")
-	values.Set("per_page", strconv.Itoa(c.perPage))
-
-	endpoint := "groups/" + url.PathEscape(strings.TrimSpace(group)) + "/projects"
-	var out []gitlabProject
-	for page := 1; ; page++ {
-		if page > maxPages {
-			return nil, fmt.Errorf("list group projects %s: exceeded max pages (%d)", group, maxPages)
-		}
-		values.Set("page", strconv.Itoa(page))
-		var projects []gitlabProject
-		next, err := c.get(ctx, "list group projects "+group, endpoint, values, &projects)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, projects...)
 		if next == "" {
 			break
 		}
@@ -317,6 +315,25 @@ func (c *Client) get(ctx context.Context, op, endpoint string, values url.Values
 		return "", fmt.Errorf("%s: decode response: %w", op, err)
 	}
 	return resp.Header.Get("X-Next-Page"), nil
+}
+
+func (c *Client) resultPageSize(maxCommits int) int {
+	if maxCommits > 0 && maxCommits < c.perPage {
+		return maxCommits
+	}
+	return c.perPage
+}
+
+func remainingQuery(q model.Query, have int) model.Query {
+	if q.MaxCommits <= 0 {
+		return q
+	}
+	remaining := q.MaxCommits - have
+	if remaining < 0 {
+		remaining = 0
+	}
+	q.MaxCommits = remaining
+	return q
 }
 
 // statusError is a non-2xx GitLab API response. Keeping the status code typed

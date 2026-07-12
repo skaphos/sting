@@ -14,6 +14,10 @@ import (
 	"github.com/skaphos/sting/model"
 )
 
+// DefaultMaxCommits bounds routine queries to the providers' maximum page size.
+// Users can still set max_commits to 0 for an exhaustive scan.
+const DefaultMaxCommits = 100
+
 // Config holds all tunable settings. The mapstructure keys are the canonical
 // configuration keys: they are the YAML/JSON config-file keys, the viper keys
 // bound to flags, and (uppercased, STING_-prefixed) the environment variables.
@@ -77,7 +81,7 @@ func Default() Config {
 		DefaultRepos:    []string{},
 		DefaultFormat:   "markdown",
 		PerPage:         100,
-		MaxCommits:      0,
+		MaxCommits:      DefaultMaxCommits,
 		IncludeStats:    false,
 		IncludeFiles:    false,
 		IncludeDiffs:    false,
@@ -125,6 +129,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return fmt.Errorf("per_page must be 1-100, got %d", cfg.PerPage)
+	}
+	if cfg.MaxCommits < 0 {
+		return fmt.Errorf("max_commits must be >= 0, got %d", cfg.MaxCommits)
 	}
 	if cfg.MaxDiffBytes < 0 {
 		return fmt.Errorf("max_diff_bytes must be >= 0, got %d", cfg.MaxDiffBytes)

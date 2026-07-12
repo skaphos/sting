@@ -46,6 +46,8 @@ type Request struct {
 	IncludeDiffs *bool
 	// MaxDiffBytes overrides the default when non-nil.
 	MaxDiffBytes *int
+	// MaxCommits overrides the default when non-nil.
+	MaxCommits *int
 	// IncludePullRequests overrides the default when non-nil.
 	IncludePullRequests *bool
 }
@@ -156,6 +158,13 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 	if maxDiffBytes < 0 {
 		return model.Query{}, fmt.Errorf("max_diff_bytes must be >= 0, got %d", maxDiffBytes)
 	}
+	maxCommits := cfg.MaxCommits
+	if req.MaxCommits != nil {
+		maxCommits = *req.MaxCommits
+	}
+	if maxCommits < 0 {
+		return model.Query{}, fmt.Errorf("max_commits must be >= 0, got %d", maxCommits)
+	}
 
 	includePRs := cfg.IncludePullRequests
 	if req.IncludePullRequests != nil {
@@ -174,7 +183,7 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		IncludeFiles:        includeFiles,
 		IncludeDiffs:        includeDiffs,
 		MaxDiffBytes:        maxDiffBytes,
-		MaxCommits:          cfg.MaxCommits,
+		MaxCommits:          maxCommits,
 		IncludePullRequests: includePRs,
 	}, nil
 }

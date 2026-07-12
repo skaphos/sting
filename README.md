@@ -170,6 +170,9 @@ sting --author mfacenet --scope repos --repos skaphos/sting --window 7d --diffs 
 ```
 
 Run `sting --help` (or `sting <command> --help`) for the full flag list.
+Queries return at most 100 commits by default to avoid routine rate-limit
+pressure; pass `--max-commits 0` only when you intentionally want an exhaustive
+scan.
 
 ### Evidence depth
 
@@ -192,7 +195,9 @@ flags when you want an agent to explain the actual code changes:
 GitHub fetches this evidence from per-commit detail calls. GitLab uses
 `with_stats` for line stats and commit diff calls for file evidence. Keep full
 diffs explicit because they cost extra API calls and can be token-heavy for an
-LLM context.
+LLM context. The MCP `get_commits` tool therefore treats an omitted
+`include_diffs` argument as `false`, even when the server config enables diffs;
+callers must explicitly pass `include_diffs: true` to request patch text.
 
 ### Scopes
 
@@ -272,7 +277,7 @@ directory, or pointed at explicitly with `--config path.yaml`.
 | `gitlab_token`     | `STING_GITLAB_TOKEN`    | `--gitlab-token`     | —          | dedicated GitLab PAT                     |
 | `gitlab_base_url`  | `STING_GITLAB_BASE_URL` | `--gitlab-base-url`  | GitLab.com | GitLab API v4 root                       |
 | `per_page`         | `STING_PER_PAGE`        | `--per-page`         | `100`      | API page size (1–100)                    |
-| `max_commits`      | `STING_MAX_COMMITS`     | `--max-commits`      | `0`        | cap on returned commits (0 = unlimited)  |
+| `max_commits`      | `STING_MAX_COMMITS`     | `--max-commits`      | `100`      | cap on returned commits (0 = unlimited)  |
 | `default_scope`    | `STING_DEFAULT_SCOPE`   | (`--scope`)          | `search`   | scope when unspecified                   |
 | `default_window`   | `STING_DEFAULT_WINDOW`  | (`--window`)         | `7d`       | look-back when `since` unspecified       |
 | `default_repos`    | `STING_DEFAULT_REPOS`   | (`--repos`)          | —          | repo/project list for `repos` scope      |
