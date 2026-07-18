@@ -340,3 +340,9 @@ internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)
 ```
 
 [viper]: https://github.com/spf13/viper
+
+---
+
+Skaphos is a project of [Rillan AI LLC](https://skaphos.io), a Missouri
+limited liability company. © 2026 Rillan AI LLC. Released under
+the [MIT License](./LICENSE).
