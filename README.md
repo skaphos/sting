@@ -6,7 +6,7 @@ LLM agent (or a terminal) in a consumable form.
 `sting` is a single binary with subcommands:
 
 - **`sting init`** — guided first-time setup (strongly recommended).
-- **`sting auth`** — authenticate with GitHub or GitLab via OAuth (`auth github`, `auth gitlab`, `auth status`, `auth logout`).
+- **`sting auth`** — authenticate with GitHub or GitLab via OAuth (`auth github`, `auth gitlab`, `auth status`, `auth logout`). The verbose `auth login github` / `auth login gitlab` forms are also supported and behave identically.
 - **`sting mcp`** — runs an MCP server over stdio exposing a single, read-only
   `get_commits` tool.
 - **`sting <query flags>`** — prints a Markdown or JSON report locally.
@@ -76,6 +76,10 @@ sting auth github --hostname ghe.example.com   # GHES / bring-your-own app
 # GitLab (device flow, same as `glab`)
 sting auth gitlab
 sting auth gitlab --hostname gitlab.example.com --client-id <YOUR_ID>
+
+# The verbose `auth login <provider>` form is equivalent to `auth <provider>`:
+sting auth login github
+sting auth login gitlab
 ```
 
 After authenticating you can check status or log out:

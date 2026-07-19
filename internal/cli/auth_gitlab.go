@@ -57,13 +57,21 @@ var (
 )
 
 func init() {
-	authGitLabCmd.Flags().StringVar(&authGitLabHostname, "hostname", "", "GitLab hostname (default: gitlab.com)")
-	authGitLabCmd.Flags().BoolVar(&authGitLabWithToken, "with-token", false, "Read a Personal Access Token from standard input")
-	authGitLabCmd.Flags().StringVar(&authGitLabClientID, "client-id", "", "OAuth application Client ID (required for device flow)")
-	authGitLabCmd.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (only needed for confidential apps)")
-	authGitLabCmd.Flags().BoolVarP(&authGitLabClipboard, "clipboard", "c", false, "Copy the user code to the clipboard")
-	authGitLabCmd.Flags().BoolVarP(&authGitLabWeb, "web", "w", false, "Open the verification URL in your browser automatically")
-	authGitLabCmd.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
+	addAuthGitLabFlags(authGitLabCmd)
+}
+
+// addAuthGitLabFlags registers the GitLab auth flags on c. It is shared by both
+// `sting auth gitlab` and the verbose `sting auth login gitlab` so the two forms
+// expose an identical flag surface backed by the same package-level variables
+// (only one of the two commands ever runs in a given invocation).
+func addAuthGitLabFlags(c *cobra.Command) {
+	c.Flags().StringVar(&authGitLabHostname, "hostname", "", "GitLab hostname (default: gitlab.com)")
+	c.Flags().BoolVar(&authGitLabWithToken, "with-token", false, "Read a Personal Access Token from standard input")
+	c.Flags().StringVar(&authGitLabClientID, "client-id", "", "OAuth application Client ID (required for device flow)")
+	c.Flags().StringVar(&authGitLabClientSecret, "client-secret", "", "OAuth application Client Secret (only needed for confidential apps)")
+	c.Flags().BoolVarP(&authGitLabClipboard, "clipboard", "c", false, "Copy the user code to the clipboard")
+	c.Flags().BoolVarP(&authGitLabWeb, "web", "w", false, "Open the verification URL in your browser automatically")
+	c.Flags().BoolVar(&authGitLabInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
 }
 
 //nolint:errcheck // fmt.Fprint* calls are for human CLI output; stdout write failures are not actionable here.

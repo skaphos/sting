@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -685,6 +686,54 @@ func TestAuthStatusOutput_VariousStates(t *testing.T) {
 			for _, want := range tc.wantSubstr {
 				if !strings.Contains(output, want) {
 					t.Errorf("output missing %q:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthLoginVerboseFormWired guards the verbose `sting auth login <provider>`
+// spelling (SKA-467 / issue #43). Both `auth login github` and `auth login gitlab`
+// must resolve, reuse the same RunE as the short `auth <provider>` form, and
+// expose an identical flag surface.
+func TestAuthLoginVerboseFormWired(t *testing.T) {
+	cases := []struct {
+		args      []string
+		want      *cobra.Command
+		shortForm *cobra.Command
+		wantFlags []string
+	}{
+		{
+			args:      []string{"auth", "login", "github"},
+			want:      authLoginGitHubCmd,
+			shortForm: authGitHubCmd,
+			wantFlags: []string{"hostname", "web", "insecure-storage", "clipboard", "client-id", "client-secret"},
+		},
+		{
+			args:      []string{"auth", "login", "gitlab"},
+			want:      authLoginGitLabCmd,
+			shortForm: authGitLabCmd,
+			wantFlags: []string{"hostname", "with-token", "client-id", "client-secret", "clipboard", "web", "insecure-storage"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			sub, _, err := rootCmd.Find(tc.args)
+			if err != nil {
+				t.Fatalf("rootCmd.Find(%v): %v", tc.args, err)
+			}
+			if sub != tc.want {
+				t.Fatalf("%v resolved to %q, want the verbose login subcommand", tc.args, sub.Name())
+			}
+			// The verbose form must share the exact handler with the short form so
+			// the two spellings cannot drift apart.
+			if reflect.ValueOf(sub.RunE).Pointer() != reflect.ValueOf(tc.shortForm.RunE).Pointer() {
+				t.Errorf("%v RunE differs from the short `auth %s` form", tc.args, tc.want.Name())
+			}
+			for _, name := range tc.wantFlags {
+				if sub.Flags().Lookup(name) == nil {
+					t.Errorf("%v missing --%s flag", tc.args, name)
 				}
 			}
 		})

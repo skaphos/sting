@@ -55,15 +55,23 @@ var (
 )
 
 func init() {
-	authGitHubCmd.Flags().StringVar(&authGitHubHostname, "hostname", "", "GitHub hostname to authenticate with (default: github.com)")
-	authGitHubCmd.Flags().BoolVarP(&authGitHubWeb, "web", "w", false, "Open a browser to authenticate instead of using the device flow")
-	authGitHubCmd.Flags().BoolVar(&authGitHubInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
-	authGitHubCmd.Flags().BoolVarP(&authGitHubClipboard, "clipboard", "c", false, "Copy the one-time code to the clipboard (device flow only)")
+	addAuthGitHubFlags(authGitHubCmd)
+}
+
+// addAuthGitHubFlags registers the GitHub auth flags on c. It is shared by both
+// `sting auth github` and the verbose `sting auth login github` so the two forms
+// expose an identical flag surface backed by the same package-level variables
+// (only one of the two commands ever runs in a given invocation).
+func addAuthGitHubFlags(c *cobra.Command) {
+	c.Flags().StringVar(&authGitHubHostname, "hostname", "", "GitHub hostname to authenticate with (default: github.com)")
+	c.Flags().BoolVarP(&authGitHubWeb, "web", "w", false, "Open a browser to authenticate instead of using the device flow")
+	c.Flags().BoolVar(&authGitHubInsecure, "insecure-storage", false, "Save the token to plaintext hosts.yml instead of the system keyring")
+	c.Flags().BoolVarP(&authGitHubClipboard, "clipboard", "c", false, "Copy the one-time code to the clipboard (device flow only)")
 
 	// Allow overriding the OAuth app credentials (required for GHES bring-your-own apps).
 	// These are documented in the Long help, so they are intentionally visible in --help.
-	authGitHubCmd.Flags().StringVar(&authGitHubClientID, "client-id", "", "OAuth client ID (required for GitHub Enterprise Server)")
-	authGitHubCmd.Flags().StringVar(&authGitHubClientSecret, "client-secret", "", "OAuth client secret (required for GitHub Enterprise Server)")
+	c.Flags().StringVar(&authGitHubClientID, "client-id", "", "OAuth client ID (required for GitHub Enterprise Server)")
+	c.Flags().StringVar(&authGitHubClientSecret, "client-secret", "", "OAuth client secret (required for GitHub Enterprise Server)")
 }
 
 // credentialStoreForStorage returns a credential store honoring the
