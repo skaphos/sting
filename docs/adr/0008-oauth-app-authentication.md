@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed.
+Accepted.
 
 ## Context
 
@@ -58,7 +58,12 @@ Support for classic Personal Access Tokens (PATs) is retained, but **strictly as
   - GitHub Enterprise Server (where apps are registered per instance).
   - Organizations that prefer their own registered app on GitHub.com or GitLab.
 - A small amount of new configuration surface will be added later for custom `client_id` / `client_secret` per provider/host (see open question 6 in the credential storage spike).
-- Update `internal/commitclient` and the MCP server path to obtain tokens via the new credential layer. The layer must support both OAuth tokens and legacy PATs, with clear precedence rules that treat OAuth as preferred when both are present for the same provider/host.
+- Update `internal/commitclient` and the MCP server path to obtain tokens via the new credential layer. The layer must support both OAuth tokens and legacy PATs, with clear precedence rules driven by a single principle: **the most explicit credential wins**. Per provider/host the order is:
+  1. sting's dedicated PAT — `--token` flag, `STING_TOKEN` / `STING_GITLAB_TOKEN` env, or the config-file `token` / `gitlab_token` key (all collapsed by viper). This is a deliberate, sting-specific choice and takes precedence over everything, including a stored OAuth token.
+  2. The OAuth token saved by `sting auth <provider>` for that host.
+  3. Anonymous / public-only.
+
+  Ambient, general-environment tokens (`GITHUB_TOKEN`, `GITLAB_TOKEN`, the `gh`/`glab` CLIs' stored credentials, etc.) are **intentionally never consulted**, preserving the strict separation established by [ADR 0002](0002-dedicated-pat-via-viper.md). ADR 0002 remains in force and is not superseded: OAuth becomes an additional dedicated "sting's own" credential that sits below the explicit PAT and above anonymous, but the tool still never reaches for a shared ambient token.
 - Document the full registration process for both GitHub.com / GitLab.com and self-hosted GHES / GitLab instances so teams can use their own apps.
 - Evolve (but do not break) the dedicated-credential philosophy from ADR 0002. OAuth tokens become the primary "sting's own" credentials. Legacy PAT configuration remains fully functional as a fallback but must be presented and documented as such.
 - All user-facing surfaces (CLI help text, `auth status` output, `sting init` guidance, README, error messages, and migration notes) must present OAuth flows as the happy path and label PAT usage explicitly as the legacy fallback option.

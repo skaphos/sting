@@ -12,8 +12,10 @@ var authCmd = &cobra.Command{
 	Short: "Authenticate with GitHub or GitLab",
 	Long: "Manage authentication for GitHub and GitLab.\n\n" +
 		"Use explicit subcommands to log in to a specific provider:\n" +
-		"  sting auth github\n" +
-		"  sting auth gitlab\n\n" +
+		"  sting auth github            (recommended short form)\n" +
+		"  sting auth gitlab\n" +
+		"  sting auth login github      (verbose form, identical behavior)\n" +
+		"  sting auth login gitlab\n\n" +
 		"Other commands:\n" +
 		"  sting auth status     Show current authentication state\n" +
 		"  sting auth logout     Remove stored credentials",
@@ -23,5 +25,6 @@ func init() {
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authGitHubCmd)
 	authCmd.AddCommand(authGitLabCmd)
+	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authLogoutCmd)
 }

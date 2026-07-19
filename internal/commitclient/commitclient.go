@@ -46,8 +46,13 @@ func New(cfg config.Config, provider model.Provider) (Client, error) {
 	}
 }
 
-// resolveGitHubToken lets explicit resolved config values win, then falls back
-// to the new credentials store for OAuth/PATs saved by auth commands.
+// resolveGitHubToken resolves the GitHub token by "most explicit wins": sting's
+// dedicated PAT (cfg.Token — the --token flag, STING_TOKEN, or config-file
+// "token", all collapsed by viper) takes precedence, then the OAuth token saved
+// by `sting auth github`, then anonymous. Ambient tokens (GITHUB_TOKEN, the gh
+// CLI's stored auth, etc.) are intentionally never consulted, preserving the
+// strict separation of ADR 0002; do not add such a fallback here. See ADR 0008
+// for the full precedence rationale.
 func resolveGitHubToken(cfg config.Config) string {
 	if cfg.Token != "" {
 		return cfg.Token
@@ -62,8 +67,10 @@ func resolveGitHubToken(cfg config.Config) string {
 	return ""
 }
 
-// resolveGitLabToken lets explicit resolved config values win, then falls back
-// to the new credentials store for OAuth/PATs saved by auth commands.
+// resolveGitLabToken mirrors resolveGitHubToken for GitLab: dedicated PAT
+// (cfg.GitLabToken) wins, then the OAuth token from `sting auth gitlab`, then
+// anonymous. Ambient GITLAB_TOKEN / glab credentials are intentionally never
+// consulted (ADR 0002); see ADR 0008.
 func resolveGitLabToken(cfg config.Config) string {
 	if cfg.GitLabToken != "" {
 		return cfg.GitLabToken
