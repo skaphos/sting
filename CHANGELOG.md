@@ -4,6 +4,13 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8](https://github.com/skaphos/sting/compare/v0.0.7...v0.0.8) (2026-07-19)
+
+
+### Features
+
+* **cli:** verbose `auth login <provider>` + accept ADR 0008 ([#44](https://github.com/skaphos/sting/issues/44)) ([95482ba](https://github.com/skaphos/sting/commit/95482ba487d5324cb9d50ad64884fdac0641f91e))
+
 ## [0.0.7](https://github.com/skaphos/sting/compare/v0.0.6...v0.0.7) (2026-07-12)
 
 
