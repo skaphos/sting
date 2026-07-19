@@ -69,7 +69,8 @@ func addAuthGitHubFlags(c *cobra.Command) {
 	c.Flags().BoolVarP(&authGitHubClipboard, "clipboard", "c", false, "Copy the one-time code to the clipboard (device flow only)")
 
 	// Allow overriding the OAuth app credentials (required for GHES bring-your-own apps).
-	// These are documented in the Long help, so they are intentionally visible in --help.
+	// Kept visible in --help so the GHES path is discoverable from either command form;
+	// the detailed GHES guidance lives in `sting auth github --help`.
 	c.Flags().StringVar(&authGitHubClientID, "client-id", "", "OAuth client ID (required for GitHub Enterprise Server)")
 	c.Flags().StringVar(&authGitHubClientSecret, "client-secret", "", "OAuth client secret (required for GitHub Enterprise Server)")
 }

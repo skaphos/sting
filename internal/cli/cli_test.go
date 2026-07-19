@@ -727,7 +727,13 @@ func TestAuthLoginVerboseFormWired(t *testing.T) {
 				t.Fatalf("%v resolved to %q, want the verbose login subcommand", tc.args, sub.Name())
 			}
 			// The verbose form must share the exact handler with the short form so
-			// the two spellings cannot drift apart.
+			// the two spellings cannot drift apart. Guard against a nil RunE first so
+			// a missing handler produces a clear failure rather than relying on the
+			// pointer comparison.
+			if sub.RunE == nil || tc.shortForm.RunE == nil {
+				t.Fatalf("%v: RunE is nil (verbose=%v, short=%v); both must be wired",
+					tc.args, sub.RunE == nil, tc.shortForm.RunE == nil)
+			}
 			if reflect.ValueOf(sub.RunE).Pointer() != reflect.ValueOf(tc.shortForm.RunE).Pointer() {
 				t.Errorf("%v RunE differs from the short `auth %s` form", tc.args, tc.want.Name())
 			}
