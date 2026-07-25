@@ -1,15 +1,16 @@
 ---
 name: "speckit-taskstoissues"
 description: "Convert existing tasks into actionable, dependency-ordered GitHub issues for the feature based on available design artifacts."
-argument-hint: "Optional filter or label for GitHub issues"
+argument-hint: "Optional granularity override: phase | story | task"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
-  author: "github-spec-kit"
-  source: "templates/commands/taskstoissues.md"
+  author: "skaphos"
+  source: "skaphos-resources/llm_resources/speckit/skills/speckit-taskstoissues"
+  upstream: "github-spec-kit templates/commands/taskstoissues.md"
+  overrides: "Groups tasks into phase/story issues instead of one issue per task"
 user-invocable: true
 disable-model-invocation: false
 ---
-
 
 ## User Input
 
@@ -17,96 +18,156 @@ disable-model-invocation: false
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+You **MUST** consider the user input before proceeding (if not empty). If it is one of
+`phase`, `story`, or `task`, treat it as a granularity override for this run.
+
+---
+
+## Why this skill overrides the upstream one
+
+Upstream `speckit.taskstoissues` creates **one GitHub issue per task**. A `tasks.md` produced by
+`/speckit-tasks` routinely contains 40–80 tasks, so the upstream behavior floods the tracker with
+dozens of single-edit issues that no one triages, assigns, or closes individually. The issue list
+stops being a board and becomes a transcript of the plan.
+
+This version groups tasks into **deliverable-sized issues** — by default one per phase, which maps
+to the setup / foundational / per-user-story / polish structure `/speckit-tasks` already produces.
+Individual tasks become checklist items inside their group, so nothing is lost: the granularity
+still exists, it just lives in a checklist rather than in the issue count.
+
+The upstream one-per-task behavior remains available via `granularity: task` for teams that want it.
+
+---
+
+## Configuration
+
+Read `.specify/extensions.yml` if it exists. Beyond the standard `hooks:` key, this skill honors a
+`settings:` block:
+
+```yaml
+settings:
+  taskstoissues:
+    granularity: phase     # phase (default) | story | task
+    max_issues: 12         # refuse to exceed this without explicit confirmation
+    labels: []             # labels applied to every created issue (must already exist)
+    title_prefix: ""       # optional prefix, e.g. "[sting]"
+```
+
+Resolution order, highest first: `$ARGUMENTS` → `settings.taskstoissues` → the defaults above.
+
+If the file is missing or unparseable, use the defaults and continue — never fail the command over
+configuration.
+
+### Granularity modes
+
+| Mode | One issue per | Typical count | Use when |
+|---|---|---|---|
+| `phase` *(default)* | `## Phase N` heading in `tasks.md` | 5–8 | Almost always. Matches how `/speckit-tasks` already structures work. |
+| `story` | user story (`[US1]`…), plus one for un-storied setup/foundational/polish tasks | 4–7 | You want the board to mirror the spec's user stories exactly. |
+| `task` | task | 40–80 | Rarely. A team that genuinely assigns and tracks individual edits. |
+
+---
 
 ## Pre-Execution Checks
 
-**Check for extension hooks (before tasks-to-issues conversion)**:
-- Check if `.specify/extensions.yml` exists in the project root.
-- If it exists, read it and look for entries under the `hooks.before_taskstoissues` key
-- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
-- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
-- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
-  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
-  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
-- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
-- For each executable hook, output the following based on its `optional` flag:
-  - **Optional hook** (`optional: true`):
-    ```
-    ## Extension Hooks
+Check `.specify/extensions.yml` for `hooks.before_taskstoissues` and dispatch per the standard
+Spec Kit hook protocol: skip entries with `enabled: false`; do not evaluate `condition`
+expressions yourself; convert dots in command names to hyphens (`speckit.git.commit` →
+`/speckit-git-commit`); emit `EXECUTE_COMMAND:` and actually invoke mandatory (`optional: false`)
+hooks, waiting for each to finish. If the file or key is absent, skip silently.
 
-    **Optional Pre-Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
-
-    Prompt: {prompt}
-    To execute: `/{command}`
-    ```
-  - **Mandatory hook** (`optional: false`):
-    ```
-    ## Extension Hooks
-
-    **Automatic Pre-Hook**: {extension}
-    Executing: `/{command}`
-    EXECUTE_COMMAND: {command}
-
-    Wait for the result of the hook command before proceeding to the Outline.
-    ```
-    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
-- If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
+---
 
 ## Outline
 
-1. Run `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
-1. **IF EXISTS**: Load `.specify/memory/constitution.md` for project principles and governance constraints.
-1. From the executed script, extract the path to **tasks**.
-1. Get the Git remote by running:
+1. Run `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` from
+   the repository root. Parse `FEATURE_DIR` and `AVAILABLE_DOCS`. Paths are absolute.
 
-```bash
-git config --get remote.origin.url
-```
+2. **IF EXISTS**: load `.specify/memory/constitution.md` for principles and governance
+   constraints that belong in each issue body (testing requirements, commit signing, PR-only).
 
-> [!CAUTION]
-> ONLY PROCEED TO NEXT STEPS IF THE REMOTE IS A GITHUB URL
+3. Resolve the tasks file from `FEATURE_DIR` and read it.
 
-1. **Fetch existing issues for deduplication**: Before creating anything, build the set of task IDs you are about to process from `tasks.md` (each is a `T` followed by three digits, e.g. `T001`). Then use the GitHub MCP server's `list_issues` tool to look for issues that already cover those IDs. Do not pass a `state` value, since omitting it makes the tool return both open and closed issues. Request `perPage: 100` to keep the number of calls down, and since the tool uses cursor-based pagination, request pages with the `after` parameter (using the `endCursor` from the previous response). For each issue title, match it against the task ID pattern `\bT\d{3}\b` (word boundaries so tokens like `ST001` or `T0010` are not matched by mistake; this also recognises titles written as `T001 ...`, `T001: ...` or `[T001] ...`) and, when it matches one of your task IDs, mark that ID as already having an issue. Stop paginating as soon as every task ID has been matched, or when there are no more pages, so you do not keep fetching the whole repository's issue history once all task IDs are accounted for. This bounds the number of calls on repos with large issue histories and still prevents duplicates when the command is re-run after `tasks.md` is regenerated or the skill is re-invoked.
-1. For each task in the list, use the GitHub MCP server to create a new issue in the repository that is representative of the Git remote. Task lines in `tasks.md` start with a markdown checkbox, so first strip the leading `- [ ]` (and any `[P]` / `[US#]` markers) to recover the task ID and its description. Create the issue with a single canonical title of the form `T001: <description>`, with the ID written once followed by the task description (for example, the line `- [ ] T001 Create project structure` becomes the title `T001: Create project structure`).
-   - **Skip** any task whose ID is already present in the set of existing issues from the previous step, and report it (for example, `T001 already has an issue, skipping`).
-   - Only create issues for tasks that do not yet have a matching issue.
+4. Confirm the remote is GitHub:
 
-> [!CAUTION]
-> UNDER NO CIRCUMSTANCES EVER CREATE ISSUES IN REPOSITORIES THAT DO NOT MATCH THE REMOTE URL
+   ```bash
+   git config --get remote.origin.url
+   ```
+
+   > [!CAUTION]
+   > **Only proceed if the remote is a GitHub URL.** Derive `owner/repo` from it and create issues
+   > **only** in that repository. Never create issues in any other repository under any
+   > circumstances.
+
+5. **Parse `tasks.md` into groups.**
+
+   Task lines look like `- [ ] T001 [P] [US1] Description with file path`. Strip the checkbox,
+   capture the ID (`T` plus three digits), and record the `[P]` and `[US#]` markers separately from
+   the description. Track the enclosing `## Phase N: ...` heading for each task.
+
+   Then group according to the resolved granularity. Every task MUST land in exactly one group —
+   verify total grouped == total parsed before creating anything, and abort with a clear message if
+   they differ. Silently dropping a task is worse than failing.
+
+6. **Apply the count guardrail.** If the number of groups exceeds `max_issues`, do not create
+   anything. Report the count, the configured limit, and the three ways forward: coarsen
+   granularity, raise `max_issues`, or confirm explicitly. This is what stops a misconfigured run
+   from flooding a tracker.
+
+7. **Deduplicate.** Build each group's stable key — the feature directory ID plus the group
+   identifier, e.g. `001-repo-activity-digest/phase-3`. Embed it in every issue body as an HTML
+   comment marker:
+
+   ```html
+   <!-- speckit:feature=001-repo-activity-digest group=phase-3 -->
+   ```
+
+   Before creating, list existing issues (open **and** closed — omit any state filter) and match
+   against these markers, falling back to the issue title when a body has no marker. Skip groups
+   that already have an issue and report each skip (`phase-3 already has an issue (#113), skipping`).
+   Paginate with `perPage: 100` and stop as soon as every key is accounted for, so re-runs on a repo
+   with a long issue history stay cheap.
+
+   In `task` mode, dedupe on the task ID with the word-boundary pattern `\bT\d{3}\b`, so `ST001` and
+   `T0010` do not match by mistake.
+
+8. **Create one issue per remaining group**, with this body structure:
+
+   - The stable marker comment (step 7)
+   - **Goal** — what the group delivers, from the spec's user story or the phase purpose
+   - **Independent test** — how to verify this group works on its own, from `tasks.md`
+   - **Depends on** — other groups, cross-referenced by issue number once known
+   - **Tasks (N)** — every task as a markdown checkbox: `- [ ] **T004** \`[P]\` — description`
+   - **Requirements** — testing and governance constraints from the constitution
+   - **Design context** — links to `spec.md`, `plan.md`, `research.md`, `data-model.md`,
+     `contracts/`, `quickstart.md` on the current branch
+
+   Titles are `<title_prefix><group label>: <short description>`, kept under 120 characters.
+   Because GitHub caps titles at 256 characters, truncate at a clause boundary and keep the full
+   text in the body — never emit a title cut mid-token or with unbalanced backticks.
+
+   Create groups in dependency order so earlier issue numbers can be referenced by later bodies.
+   Space creation by ~1 second to stay under GitHub's content-creation secondary rate limit. If a
+   body references a group created later, update it after the fact rather than leaving a dangling
+   placeholder.
+
+9. **Report**: issues created with numbers, groups skipped as duplicates, the granularity used, and
+   confirmation that grouped task count equals parsed task count.
+
+---
 
 ## Post-Execution Checks
 
-**Check for extension hooks (after tasks-to-issues conversion)**:
-Check if `.specify/extensions.yml` exists in the project root.
-- If it exists, read it and look for entries under the `hooks.after_taskstoissues` key
-- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
-- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
-- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
-  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
-  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
-- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
-- For each executable hook, output the following based on its `optional` flag:
-  - **Optional hook** (`optional: true`):
-    ```
-    ## Extension Hooks
+Check `.specify/extensions.yml` for `hooks.after_taskstoissues` and dispatch per the same protocol
+as the pre-execution checks. If absent, skip silently.
 
-    **Optional Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
+---
 
-    Prompt: {prompt}
-    To execute: `/{command}`
-    ```
-  - **Mandatory hook** (`optional: false`):
-    ```
-    ## Extension Hooks
+## Done When
 
-    **Automatic Hook**: {extension}
-    Executing: `/{command}`
-    EXECUTE_COMMAND: {command}
-    ```
-    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
-- If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
+- [ ] Remote verified as GitHub and issues created only in the matching repository
+- [ ] Every parsed task appears in exactly one issue
+- [ ] Group count within `max_issues`, or explicitly confirmed
+- [ ] Existing issues detected and skipped rather than duplicated
+- [ ] Extension hooks dispatched or skipped per protocol
+- [ ] Completion reported with issue numbers, skips, and granularity used

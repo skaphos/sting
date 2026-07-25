@@ -1,0 +1,60 @@
+# Spec Kit extensions for this repository.
+#
+# Canonical template: skaphos-resources/llm_resources/speckit/templates/extensions.yml
+# Standard:           skaphos-resources/standards/speckit-extensions.md
+#
+# Copy to .specify/extensions.yml in the consuming repository. Every key is optional;
+# an absent file means "stock Spec Kit behavior with skaphos skill overrides applied".
+
+# ──────────────────────────────────────────────────────────────────────────────
+# settings — read by skaphos skill overrides. Ignored by stock Spec Kit skills.
+# ──────────────────────────────────────────────────────────────────────────────
+settings:
+  taskstoissues:
+    # phase (default) | story | task
+    #
+    # phase  → one issue per "## Phase N" heading; tasks become checklist items.
+    #          5-8 issues for a typical feature. This is the skaphos default.
+    # story  → one issue per user story, plus one for setup/foundational/polish.
+    # task   → one issue per task (stock upstream behavior). Produces 40-80 issues
+    #          for a typical feature; use only if you genuinely assign individual edits.
+    granularity: phase
+
+    # Refuse to create more than this many issues without explicit confirmation.
+    # The guardrail that stops a misconfigured run from flooding the tracker.
+    max_issues: 12
+
+    # Labels applied to every created issue. They MUST already exist in the repo —
+    # issue creation fails on unknown labels.
+    labels: []
+
+    # Optional title prefix, e.g. "[sting]". Empty means no prefix.
+    title_prefix: ""
+
+# ──────────────────────────────────────────────────────────────────────────────
+# hooks — run another slash command before/after a Spec Kit command.
+#
+# IMPORTANT: hooks can only run a command before or after the core command. They
+# cannot change what the core command does. Behavioral changes (like issue
+# granularity above) require a skill override, not a hook.
+#
+# Recognized keys: before_/after_ specify, clarify, plan, tasks, taskstoissues,
+# implement, analyze, checklist, constitution, converge.
+#
+# Per-hook fields:
+#   extension    display name
+#   command      dotted command id; dots become hyphens (speckit.git.commit -> /speckit-git-commit)
+#   description  one line shown to the operator
+#   prompt       shown for optional hooks
+#   optional     true  -> offered to the operator; false -> run automatically and waited on
+#   enabled      false -> skipped entirely (default true)
+#   condition    evaluated by the HookExecutor, never by the agent
+# ──────────────────────────────────────────────────────────────────────────────
+hooks: {}
+  # Example — automatically create a branch before /speckit-specify:
+  #
+  # before_specify:
+  #   - extension: git
+  #     command: speckit.git.branch
+  #     description: Create and switch to the feature branch
+  #     optional: false
