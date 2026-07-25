@@ -162,15 +162,15 @@ publishes an entry whose version matches the tag.
 
 ### Tests for User Story 4 (REQUIRED) ⚠️
 
-- [ ] T041 [P] [US4] Add a `server.json` schema-validation step to `.github/workflows/ci.yml` against `https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json` (FR-027)
-- [ ] T042 [P] [US4] Add a drift test asserting `server.json` describes exactly the tools `mcpserver.ReadOnlyTools()` advertises in `internal/mcpserver/server_test.go` (FR-030)
+- [X] T041 [P] [US4] Add a `server.json` schema-validation step to `.github/workflows/ci.yml` against `https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json` (FR-027)
+- [X] T042 [P] [US4] Add a drift test asserting `server.json` describes exactly the tools `mcpserver.ReadOnlyTools()` advertises in `internal/mcpserver/server_test.go` (FR-030)
 
 ### Implementation for User Story 4
 
-- [ ] T043 [US4] Create `server.json` at repository root per contracts/server-json.md, named `io.skaphos/sting` with an OCI package entry, stdio transport, and the `STING_TOKEN`/`STING_GITLAB_TOKEN` environment variables (FR-026)
-- [ ] T044 [US4] Add an `mcp-publisher login dns` + `publish` step to `.github/workflows/release.yml`, authenticating with the org-scoped `MCP_REGISTRY_KEY` secret (FR-028)
-- [ ] T045 [US4] Make the registry publish step non-blocking but loudly reported — `continue-on-error` plus a workflow annotation — so a failure is visible without invalidating the release (FR-029)
-- [ ] T046 [US4] Document the `skaphos.io` TXT record (`v=MCPv1; k=ed25519; p=<base64>`) and the `MCP_REGISTRY_KEY` secret as release prerequisites in `docs/adr/0011-self-update-trust-model.md` or a sibling operations note
+- [X] T043 [US4] Create `server.json` at repository root per contracts/server-json.md, named `io.skaphos/sting` with an OCI package entry, stdio transport, and the `STING_TOKEN`/`STING_GITLAB_TOKEN` environment variables (FR-026)
+- [X] T044 [US4] Add an `mcp-publisher login dns` + `publish` step to `.github/workflows/release.yml`, authenticating with the org-scoped `MCP_REGISTRY_KEY` secret (FR-028)
+- [X] T045 [US4] Make the registry publish step non-blocking but loudly reported — `continue-on-error` plus a workflow annotation — so a failure is visible without invalidating the release (FR-029)
+- [X] T046 [US4] Document the `skaphos.io` TXT record (`v=MCPv1; k=ed25519; p=<base64>`) and the `MCP_REGISTRY_KEY` secret as release prerequisites in `docs/adr/0011-self-update-trust-model.md` or a sibling operations note
 
 **Checkpoint**: `server.json` validates in CI; publishing is wired and non-blocking.
 

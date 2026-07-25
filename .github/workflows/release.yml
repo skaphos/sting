@@ -96,3 +96,51 @@ jobs:
             dist/checksums.txt
             dist/*.sbom.json
             dist/*.sigstore.json
+
+      # Publish the MCP registry entry. This is the one channel that does not
+      # fail the release as a unit: DECISIONS/0001 records the registry as the
+      # least settled channel, where a break is a smaller emergency than a broken
+      # cask, and it is still in preview upstream. It is therefore
+      # continue-on-error -- but loudly, never silently, and the post-release
+      # verification job reports whether the entry actually landed.
+      - name: Stamp the release version into server.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          tmp="$(mktemp)"
+          jq --arg v "$version" \
+            '.version = $v | .packages[].version = $v' server.json > "$tmp"
+          mv "$tmp" server.json
+          echo "server.json stamped to ${version}"
+
+      - name: Install mcp-publisher
+        id: mcp_publisher_install
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          go install github.com/modelcontextprotocol/registry/cmd/mcp-publisher@latest
+
+      - name: Publish to the MCP registry
+        id: mcp_publish
+        continue-on-error: true
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MCP_REGISTRY_KEY}" ]; then
+            echo "::warning title=MCP registry::MCP_REGISTRY_KEY is not set; skipping registry publish."
+            exit 1
+          fi
+          mcp-publisher login dns --domain skaphos.io --private-key "${MCP_REGISTRY_KEY}"
+          mcp-publisher publish
+
+      - name: Report MCP registry outcome
+        if: always()
+        run: |
+          if [ "${{ steps.mcp_publish.outcome }}" != "success" ]; then
+            echo "::warning title=MCP registry::Publishing io.skaphos/sting failed. The rest of the release is valid and complete; re-run this step to retry without cutting a new release. Check the skaphos.io TXT record (v=MCPv1; k=ed25519) and the MCP_REGISTRY_KEY secret."
+          else
+            echo "MCP registry entry published for ${GITHUB_REF_NAME}."
+          fi
