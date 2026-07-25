@@ -205,16 +205,16 @@ client, passing a credential through the environment.
 **Purpose**: The release-coherence work that asserts on everything the prior phases produce. Last
 because it depends on all of them.
 
-- [ ] T054 **Change existing behavior**: make an unusable Homebrew credential fail the release in `.github/workflows/release.yml`, replacing the current `--skip=homebrew` + `::warning::` path (FR-038) — the highest-value change in this feature relative to the documented failure mode
-- [ ] T055 Add a post-release `verify` job to `.github/workflows/release.yml`, gated on the release job, asserting the **version each channel serves** for release assets, the Homebrew cask, and the container image (FR-039, FR-040)
-- [ ] T056 Include the MCP registry in the verify job as a reported, non-blocking channel (FR-029, FR-040)
-- [ ] T057 Add retry-with-backoff to the verify job so third-party propagation latency is not reported as a failed release (FR-041)
-- [ ] T058 [P] Add an upgrade-path matrix to `README.md` mapping each install channel to its correct upgrade command (FR-043)
-- [ ] T059 [P] Update `AGENTS.md` if any development workflow changed
-- [ ] T060 Verify the per-package coverage gate passes, including the new `internal/buildinfo` and `internal/selfupdate` packages at the 80% default (`go -C tools tool task test` plus `scripts/check-coverage.sh`)
-- [ ] T061 Run `go -C tools tool task ci` and confirm it passes end to end
-- [ ] T062 Run the [quickstart.md](./quickstart.md) validation for every user story
-- [ ] T063 Confirm `reuse lint` still passes for all new files (`REUSE.toml` uses an aggregate `**` annotation, so new files are covered — verify rather than assume)
+- [X] T054 **Change existing behavior**: make an unusable Homebrew credential fail the release in `.github/workflows/release.yml`, replacing the current `--skip=homebrew` + `::warning::` path (FR-038) — the highest-value change in this feature relative to the documented failure mode
+- [X] T055 Add a post-release `verify` job to `.github/workflows/release.yml`, gated on the release job, asserting the **version each channel serves** for release assets, the Homebrew cask, and the container image (FR-039, FR-040)
+- [X] T056 Include the MCP registry in the verify job as a reported, non-blocking channel (FR-029, FR-040)
+- [X] T057 Add retry-with-backoff to the verify job so third-party propagation latency is not reported as a failed release (FR-041)
+- [X] T058 [P] Add an upgrade-path matrix to `README.md` mapping each install channel to its correct upgrade command (FR-043)
+- [X] T059 [P] Update `AGENTS.md` if any development workflow changed
+- [X] T060 Verify the per-package coverage gate passes, including the new `internal/buildinfo` and `internal/selfupdate` packages at the 80% default (`go -C tools tool task test` plus `scripts/check-coverage.sh`)
+- [X] T061 Run `go -C tools tool task ci` and confirm it passes end to end
+- [X] T062 Run the [quickstart.md](./quickstart.md) validation for every user story
+- [X] T063 Confirm `reuse lint` still passes for all new files (`REUSE.toml` uses an aggregate `**` annotation, so new files are covered — verify rather than assume)
 
 ---
 
