@@ -111,15 +111,24 @@ ls dist/*.deb dist/*.rpm      # expect 2 each: amd64, arm64
 Install each on a matching image:
 
 ```sh
-docker run --rm -v "$PWD/dist:/d" debian:stable \
-  sh -c 'dpkg -i /d/sting_*_amd64.deb && sting version && dpkg -r sting'
+docker run --rm -v "$PWD/dist:/d:ro" debian:stable sh -c '
+  dpkg -i /d/sting_*_amd64.deb && sting version && ls /usr/share/doc/sting/ && dpkg -r sting'
 
-docker run --rm -v "$PWD/dist:/d" fedora:latest \
-  sh -c 'rpm -i /d/sting_*_amd64.rpm && sting version && rpm -e sting'
+docker run --rm -v "$PWD/dist:/d:ro" fedora:latest sh -c '
+  rpm -i /d/sting-*.x86_64.rpm && sting version && rpm -qf $(command -v sting) && rpm -e sting'
 ```
 
-**Pass**: binary on `PATH`, reports the snapshot version, license and notice files present at the
-packaging-conventional path, removal leaves nothing behind.
+**Use `debian:stable`, not `debian:stable-slim`.** The slim image ships
+`path-exclude /usr/share/doc/*` in its dpkg configuration, so the license and notice files are
+silently dropped on install and the package looks broken when it is not. This is a property of
+that image, not of the package.
+
+**Pass**: binary on `PATH`, reports the snapshot version, `LICENSE` /
+`THIRD_PARTY_NOTICES.md` / `third_party_licenses/` present under `/usr/share/doc/sting/`, the
+package database claims the binary, and removal leaves nothing behind.
+
+The `rpm -qf` check is doing double duty: it is also what `sting update` relies on to detect an
+RPM-owned install and refuse to overwrite it.
 
 ```sh
 grep -c '\.deb\|\.rpm' dist/checksums.txt    # packages are in the manifest (FR-024)

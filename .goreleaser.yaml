@@ -60,11 +60,53 @@ archives:
       - THIRD_PARTY_NOTICES.md
       - third_party_licenses/**
 
+# Linux OS packages. Required for Shape 2 (end-user CLI) by skaphos-resources
+# DECISIONS/0001. Built from the same binaries as the archives, attached to the
+# same release, and covered by the same checksum manifest, signature, and
+# provenance attestation.
+#
+# There is deliberately no hosted apt/yum repository: DECISIONS/0001 puts that
+# out of scope as a materially larger commitment needing its own record. The
+# README says so plainly, so a .deb on a release page is not read as an implied
+# apt repo.
+nfpms:
+  - id: sting
+    ids:
+      - sting
+    package_name: sting
+    formats:
+      - deb
+      - rpm
+    maintainer: "Skaphos <shawn@skaphos.io>"
+    homepage: "https://github.com/skaphos/sting"
+    description: "Query a GitHub or GitLab user's commits over a time window, as a CLI or MCP server"
+    license: "MIT"
+    vendor: "Skaphos"
+    section: "utils"
+    bindir: /usr/bin
+    # Conventional per-format naming: sting_1.2.0_amd64.deb and
+    # sting-1.2.0-1.x86_64.rpm, rather than one shape forced onto both.
+    file_name_template: "{{ .ConventionalFileName }}"
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/sting/LICENSE
+      - src: THIRD_PARTY_NOTICES.md
+        dst: /usr/share/doc/sting/THIRD_PARTY_NOTICES.md
+      - src: third_party_licenses
+        dst: /usr/share/doc/sting/third_party_licenses
+
 checksum:
   name_template: "checksums.txt"
 
 sboms:
-  - artifacts: archive
+  - id: archives
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+  # Packages do not inherit the archive SBOM: they are separate artifacts and
+  # need their own, or the .deb/.rpm ship without one.
+  - id: packages
+    artifacts: package
     documents:
       - "{{ .ArtifactName }}.sbom.json"
 

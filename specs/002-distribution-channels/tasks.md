@@ -139,15 +139,15 @@ and reports the release version, then remove it and confirm nothing is left behi
 
 ### Tests for User Story 3 (REQUIRED) ⚠️
 
-- [ ] T035 [P] [US3] Add a `goreleaser check` step to `.github/workflows/ci.yml` so `.goreleaser.yaml` is validated on every change
-- [ ] T036 [P] [US3] Document the snapshot install/remove validation for both package formats in `specs/002-distribution-channels/quickstart.md` (already drafted — verify it runs as written)
+- [X] T035 [P] [US3] Add a `goreleaser check` step to `.github/workflows/ci.yml` so `.goreleaser.yaml` is validated on every change
+- [X] T036 [P] [US3] Document the snapshot install/remove validation for both package formats in `specs/002-distribution-channels/quickstart.md` (already drafted — verify it runs as written)
 
 ### Implementation for User Story 3
 
-- [ ] T037 [US3] Add an `nfpms:` block to `.goreleaser.yaml` producing `deb` and `rpm` for amd64 and arm64, with binary at `/usr/bin/sting` and license plus notice files at the packaging-conventional path (FR-021, FR-022)
-- [ ] T038 [US3] Declare maintainer, homepage, license (MIT), and description in the `nfpms:` block (FR-023)
-- [ ] T039 [US3] Extend the `sboms:` block in `.goreleaser.yaml` with an `artifacts: package` entry so packages carry SBOMs (research §6 — the one guarantee packages do *not* inherit for free)
-- [ ] T040 [US3] Add a Linux packages section to `README.md` stating plainly that there is no hosted apt/yum repository and that upgrades mean downloading the next release (FR-025)
+- [X] T037 [US3] Add an `nfpms:` block to `.goreleaser.yaml` producing `deb` and `rpm` for amd64 and arm64, with binary at `/usr/bin/sting` and license plus notice files at the packaging-conventional path (FR-021, FR-022)
+- [X] T038 [US3] Declare maintainer, homepage, license (MIT), and description in the `nfpms:` block (FR-023)
+- [X] T039 [US3] Extend the `sboms:` block in `.goreleaser.yaml` with an `artifacts: package` entry so packages carry SBOMs (research §6 — the one guarantee packages do *not* inherit for free)
+- [X] T040 [US3] Add a Linux packages section to `README.md` stating plainly that there is no hosted apt/yum repository and that upgrades mean downloading the next release (FR-025)
 
 **Checkpoint**: A snapshot build emits 4 packages, all listed in `checksums.txt`.
 

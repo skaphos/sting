@@ -26,6 +26,22 @@ brew tap skaphos/tools https://github.com/skaphos/homebrew-tools
 brew install --cask skaphos/tools/sting
 ```
 
+### Linux packages
+
+`.deb` and `.rpm` packages for x86-64 and arm64 are attached to every
+[release](https://github.com/skaphos/sting/releases):
+
+```sh
+sudo dpkg -i sting_<version>_amd64.deb     # Debian, Ubuntu
+sudo rpm -i sting-<version>.x86_64.rpm     # Fedora, RHEL, openSUSE
+```
+
+**There is no hosted apt or yum repository.** Shipping a `.deb` is not the same
+as running a package repository, and sting does not run one — hosting signed
+repositories is a materially larger commitment
+([DECISIONS/0001](https://github.com/skaphos/skaphos-resources/blob/main/DECISIONS/0001-distribution-channels-by-artifact-shape.md)
+puts it out of scope). Upgrading means downloading the next release's package.
+
 Or install from source:
 
 ```sh
