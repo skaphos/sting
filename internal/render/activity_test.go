@@ -291,3 +291,55 @@ func TestRenderActivityDefaultBranchLabel(t *testing.T) {
 		t.Errorf("an unresolved reference is not labeled:\n%s", out)
 	}
 }
+
+// TestRenderActivityEmptyWindowBaseIsNotLabelledRepositoryRoot distinguishes the
+// two causes of an empty BaseSHA. An empty window has no boundaries at all,
+// whereas a root-commit window genuinely has no parent to compare against;
+// labelling the former "repository root" tells the reader the window reached the
+// repository's first commit when it reached nothing.
+func TestRenderActivityEmptyWindowBaseIsNotLabelledRepositoryRoot(t *testing.T) {
+	t.Parallel()
+	r := sampleActivity()
+	r.Count = 0
+	r.Commits = nil
+	r.ChangeSet = model.ChangeSet{}
+	// What resolveBoundaries produces for a window with no commits: no SHAs and
+	// no base source.
+	r.Boundaries = model.Boundaries{Status: model.StatusIdentical, SharedRoot: true}
+
+	out, err := render.RenderActivity(r, render.FormatMarkdown)
+	if err != nil {
+		t.Fatalf("RenderActivity: %v", err)
+	}
+	if strings.Contains(out, "repository root") {
+		t.Errorf("empty window rendered as a repository-root base:\n%s", out)
+	}
+	if !strings.Contains(out, "(none)..(none)") {
+		t.Errorf("empty window boundaries not rendered as absent:\n%s", out)
+	}
+}
+
+// TestRenderActivityRootCommitBaseIsLabelled is the other half: a genuine
+// root-commit window must still say so.
+func TestRenderActivityRootCommitBaseIsLabelled(t *testing.T) {
+	t.Parallel()
+	r := sampleActivity()
+	r.Boundaries = model.Boundaries{
+		BaseSHA:    "",
+		HeadSHA:    "1ae89e4beef1111",
+		BaseSource: model.BaseSourceRepositoryRoot,
+		Status:     model.StatusAhead,
+		SharedRoot: true,
+	}
+
+	out, err := render.RenderActivity(r, render.FormatMarkdown)
+	if err != nil {
+		t.Fatalf("RenderActivity: %v", err)
+	}
+	if !strings.Contains(out, "(repository root)") {
+		t.Errorf("root-commit window not labelled:\n%s", out)
+	}
+	if !strings.Contains(out, model.BaseSourceRepositoryRoot) {
+		t.Errorf("base source not rendered:\n%s", out)
+	}
+}

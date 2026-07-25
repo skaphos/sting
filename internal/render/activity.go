@@ -98,9 +98,17 @@ func writeActivityHeader(b *strings.Builder, r model.ActivityResult) {
 		r.Until.UTC().Format("2006-01-02T15:04:05Z"),
 		basisLabel(r.WindowDateBasis))
 
+	// An empty BaseSHA has two distinct causes, and conflating them misleads:
+	// a root-commit window (BaseSource says so) genuinely has no parent to
+	// compare against, whereas an empty window simply has no boundaries at all.
+	// Only the former is "repository root".
 	base := r.Boundaries.BaseSHA
 	if base == "" {
-		base = "(repository root)"
+		if r.Boundaries.BaseSource == model.BaseSourceRepositoryRoot {
+			base = "(repository root)"
+		} else {
+			base = "(none)"
+		}
 	}
 	head := r.Boundaries.HeadSHA
 	if head == "" {

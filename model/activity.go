@@ -34,8 +34,11 @@ const (
 	// the first parent of the earliest in-window commit.
 	BaseSourceParentOfEarliest = "parent-of-earliest"
 	// BaseSourceRepositoryRoot means the earliest in-window commit is the
-	// repository's root commit, so there is no parent to compare against and
-	// the change set covers everything since inception.
+	// repository's root commit, so there is no parent to compare against. The
+	// comparison runs from that root commit itself, which makes its contents
+	// the base state: the files it introduced are NOT reported as changes in
+	// the window. BaseSHA is empty in this case, and a disclosure states the
+	// limitation.
 	BaseSourceRepositoryRoot = "repository-root"
 )
 
