@@ -120,6 +120,35 @@ signs:
       - ${artifact}
       - --yes
 
+# Multi-arch container image. Required for Shape 3 (MCP server) by
+# skaphos-resources DECISIONS/0001, so sting can be run from a docker-based MCP
+# client configuration.
+#
+# dockers_v2 builds a buildx manifest from the binaries GoReleaser has already
+# built, rather than compiling inside the Dockerfile. That is what keeps the
+# image part of the single release invocation: it fails as a unit with every
+# other channel, and it ships the same signed bytes as the archives.
+dockers_v2:
+  - id: sting
+    ids:
+      - sting
+    images:
+      - ghcr.io/skaphos/sting
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    labels:
+      org.opencontainers.image.title: "sting"
+      org.opencontainers.image.description: "Query a GitHub or GitLab user's commits over a time window, as a CLI or MCP server"
+      org.opencontainers.image.url: "https://github.com/skaphos/sting"
+      org.opencontainers.image.source: "https://github.com/skaphos/sting"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: "MIT"
+
 changelog:
   sort: asc
   use: github

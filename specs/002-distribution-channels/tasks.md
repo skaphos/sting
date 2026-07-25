@@ -185,16 +185,16 @@ client, passing a credential through the environment.
 
 ### Tests for User Story 5 (REQUIRED) ⚠️
 
-- [ ] T047 [P] [US5] Extend the `goreleaser check` CI step to cover the new `dockers_v2` block (shares the step added in T035)
-- [ ] T048 [P] [US5] Add a snapshot-build validation step to `specs/002-distribution-channels/quickstart.md` confirming both platform-suffixed images build locally (snapshot mode does not push, so there is no manifest to inspect)
+- [X] T047 [P] [US5] Extend the `goreleaser check` CI step to cover the new `dockers_v2` block (shares the step added in T035)
+- [X] T048 [P] [US5] Add a snapshot-build validation step to `specs/002-distribution-channels/quickstart.md` confirming both platform-suffixed images build locally (snapshot mode does not push, so there is no manifest to inspect)
 
 ### Implementation for User Story 5
 
-- [ ] T049 [US5] Create `Dockerfile` at repository root that copies the GoReleaser-built binary from the per-platform build context, runs as a non-root user, includes CA certificates, and defaults to `sting mcp` (FR-031, FR-032, FR-033)
-- [ ] T050 [US5] Add a `dockers_v2:` block to `.goreleaser.yaml` for `ghcr.io/skaphos/sting`, platforms `linux/amd64` and `linux/arm64`, tagged with the version and `latest` (FR-031; research §3)
-- [ ] T051 [US5] Add buildx setup, binfmt, and GHCR login steps to `.github/workflows/release.yml` before the GoReleaser step, all release-blocking on failure (research §3, FR-037)
-- [ ] T052 [US5] Ensure the image carries an SBOM, signature, and provenance attestation equivalent to the archives (FR-035)
-- [ ] T053 [US5] Add a container-based MCP client configuration to `README.md` alongside the local-binary one (FR-036)
+- [X] T049 [US5] Create `Dockerfile` at repository root that copies the GoReleaser-built binary from the per-platform build context, runs as a non-root user, includes CA certificates, and defaults to `sting mcp` (FR-031, FR-032, FR-033)
+- [X] T050 [US5] Add a `dockers_v2:` block to `.goreleaser.yaml` for `ghcr.io/skaphos/sting`, platforms `linux/amd64` and `linux/arm64`, tagged with the version and `latest` (FR-031; research §3)
+- [X] T051 [US5] Add buildx setup, binfmt, and GHCR login steps to `.github/workflows/release.yml` before the GoReleaser step, all release-blocking on failure (research §3, FR-037)
+- [X] T052 [US5] Ensure the image carries an SBOM, signature, and provenance attestation equivalent to the archives (FR-035)
+- [X] T053 [US5] Add a container-based MCP client configuration to `README.md` alongside the local-binary one (FR-036)
 
 **Checkpoint**: A snapshot build produces per-platform images; a real release produces a multi-arch manifest.
 

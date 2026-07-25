@@ -185,6 +185,32 @@ sting install list                 # show registration state per runtime
 sting uninstall                    # remove entries (prompts unless --yes)
 ```
 
+### Running the server from a container
+
+If you would rather not install sting locally, MCP clients that support a
+`docker` command can run the published image instead. It needs no Go toolchain
+and works on x86-64 and arm64:
+
+```json
+{
+  "mcpServers": {
+    "sting": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i",
+               "-e", "STING_TOKEN",
+               "ghcr.io/skaphos/sting:latest"],
+      "env": { "STING_TOKEN": "ghp_xxx" }
+    }
+  }
+}
+```
+
+The image runs as a non-root user, contains no credentials, and starts the MCP
+server over stdio with no arguments. Credentials come from the environment,
+using the same `STING_` names as the local binary.
+
+### Registering the local binary
+
 `install` writes a `sting mcp` entry pointing at the current executable. Because
 `get_commits` is **read-only** (advertised via the MCP `readOnlyHint`
 annotation), the Claude snippet also prints a paste-ready `permissions.allow`
