@@ -5,6 +5,27 @@ CLI or as an MCP server exposing a single read-only `get_commits` tool. It is
 read-only by design and uses dedicated provider PATs kept separate from ambient
 provider tokens.
 
+## Agent Resources
+
+Orient here before reading source or running broad searches.
+
+- **`.specify/memory/constitution.md`** — the project constitution, derived from the Skaphos
+  constitution (`skaphos-resources/standards/constitution.md`). It is authoritative: where this
+  file and the constitution disagree, the constitution wins and this file gets fixed. Read it
+  before proposing behavior changes, especially anything touching read-only safety, the public
+  package contract, or credentials.
+- **`.specify/`** — spec-kit scaffolding (templates, scripts, workflow). Feature work follows
+  `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`; the plan's
+  Constitution Check gate table must pass before implementation. Generated specs land in
+  `specs/<###-feature-name>/`.
+- **`docs/adr/README.md`** — the index of binding architectural decisions. Cite the relevant ADR
+  rather than re-deriving a settled question, and supersede rather than rewrite.
+- **`graphify-out/GRAPH_REPORT.md`** — a generated map of the codebase: god nodes, communities,
+  and inferred ADR-to-code rationale edges. It records the commit it was built from; compare that
+  with `git rev-parse HEAD` and treat it as stale if they differ. Only the report is tracked —
+  regenerate the full graph (enabling `graphify query` / `path` / `explain`) with
+  `graphify update .`, which is AST-only and costs nothing.
+
 ## Project Structure & Module Organization
 
 Public packages (importable; the evidence contract — see

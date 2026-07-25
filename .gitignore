@@ -16,5 +16,9 @@ config.yaml
 dist/
 
 # Graphify
-graphify-out/
+# GRAPH_REPORT.md is tracked as the agent-facing codebase map; everything else
+# (graph.json, graph.html, cache/, cost.json) is large, churns on every code
+# change, and regenerates for free with `graphify update .`.
+graphify-out/*
+!graphify-out/GRAPH_REPORT.md
 .graphify_*
