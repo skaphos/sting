@@ -20,16 +20,52 @@ type Client interface {
 	Collect(context.Context, model.Query) (model.Result, error)
 }
 
-// New builds the provider client selected by provider using cfg. provider is
-// expected to be an already-resolved, non-empty value: config.Resolve applies
-// the empty->default->github fallback and rejects invalid providers, so New does
-// not repeat that defaulting. The switch's default branch is kept as a guard so
-// the exported constructor never returns a nil client for an unexpected value.
-func New(cfg config.Config, provider model.Provider) (Client, error) {
+// ActivityClient gathers a repository's activity over a window. It is a
+// separate interface from Client because only GitHub implements it: a GitLab
+// activity path is not stubbed out, since config.ResolveActivity rejects
+// non-GitHub providers before a client is ever constructed.
+type ActivityClient interface {
+	CollectActivity(context.Context, model.ActivityQuery) (model.ActivityResult, error)
+}
+
+// NewActivity builds the GitHub client for a repository-activity query, wiring
+// in the request budget so every provider call is accounted and bounded.
+//
+// It takes no provider argument: repository activity is GitHub-only, and the
+// rejection lives in config.ResolveActivity so the failure is identical whether
+// the request came from the CLI or from MCP, and is unreachable with a
+// half-built client behind it.
+func NewActivity(cfg config.Config, q model.ActivityQuery) (ActivityClient, error) {
+	if q.Provider != "" && q.Provider != model.ProviderGitHub {
+		return nil, fmt.Errorf("provider %q does not support repository activity (github only)", q.Provider)
+	}
+	token := resolveGitHubToken(cfg)
+	client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage, ghclient.WithRequestBudget(q.MaxRequests))
+	if err != nil {
+		return nil, fmt.Errorf("build github client: %w", err)
+	}
+	return client, nil
+}
+
+// New builds the provider client for a resolved query. q.Provider is expected
+// to be an already-resolved, non-empty value: config.Resolve applies the
+// empty->default->github fallback and rejects invalid providers, so New does not
+// repeat that defaulting. The switch's default branch is kept as a guard so the
+// exported constructor never returns a nil client for an unexpected value.
+//
+// It takes the whole query rather than just the provider so the per-call request
+// ceiling reaches the client; a ceiling resolved into the query but never handed
+// to the transport would be silently ignored.
+func New(cfg config.Config, q model.Query) (Client, error) {
+	provider := q.Provider
 	switch provider {
 	case model.ProviderGitHub:
 		token := resolveGitHubToken(cfg)
-		client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage)
+		// Account for every author-scoped path too, not just the activity one:
+		// the transport-level budget covers search, repos, org, PR discovery,
+		// and enrichment without any of them knowing about it.
+		client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage,
+			ghclient.WithRequestBudget(q.MaxRequests))
 		if err != nil {
 			return nil, fmt.Errorf("build github client: %w", err)
 		}

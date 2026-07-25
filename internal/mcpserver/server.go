@@ -36,6 +36,7 @@ type GetCommitsInput struct {
 	IncludeDiffs *bool    `json:"include_diffs,omitempty" jsonschema:"opt in to bounded patch text for changed files; defaults to false, implies include_files, and uses extra API calls and tokens"`
 	MaxDiffBytes int      `json:"max_diff_bytes,omitempty" jsonschema:"per-commit patch byte cap when include_diffs is true; defaults to server config"`
 	MaxCommits   *int     `json:"max_commits,omitempty" jsonschema:"cap returned commits for this call; defaults to server config, set 0 only for an intentional exhaustive scan"`
+	MaxRequests  *int     `json:"max_requests,omitempty" jsonschema:"cap provider requests for this call; defaults to the server default of 500; set 0 only for an intentional uncapped run"`
 	IncludePRs   *bool    `json:"include_prs,omitempty" jsonschema:"also discover commits on open pull-request branches (scope=repos or org, GitHub only); finds unmerged work that commit search and branch listing miss, at the cost of extra API calls"`
 }
 
@@ -44,7 +45,65 @@ type handler struct {
 	cfg config.Config
 }
 
-// New builds an MCP server exposing the get_commits tool, configured from cfg.
+// toolDefinition pairs a tool's declaration with the call that registers it.
+// The registration is a closure because mcp.AddTool is generic over each tool's
+// input and output types, which a single slice cannot express directly.
+type toolDefinition struct {
+	tool     *mcp.Tool
+	register func(server *mcp.Server, tool *mcp.Tool, h *handler)
+}
+
+// toolDefinitions is the one place sting's MCP tools are declared. Both New
+// (registration) and ReadOnlyTools (the installer auto-approve list) derive
+// from it, so the two cannot drift: a tool cannot be registered without
+// appearing in the auto-approve list, and the failure mode where a registered
+// tool silently stops being auto-approved is structurally impossible.
+//
+// See ADR 0010. A drift test asserts every entry here carries ReadOnlyHint,
+// which is what makes Constitution Principle I mechanical rather than
+// conventional.
+func toolDefinitions() []toolDefinition {
+	return []toolDefinition{
+		{
+			tool: &mcp.Tool{
+				Name: "get_commits",
+				Description: "Retrieve a GitHub or GitLab user's commits over a time window. " +
+					"Returns the commits as structured data plus a Markdown summary so " +
+					"you can describe what the person has been working on.",
+				// The tool only reads from provider APIs; it never mutates anything.
+				// OpenWorldHint is true because it reaches an external service.
+				Annotations: &mcp.ToolAnnotations{
+					ReadOnlyHint:  true,
+					OpenWorldHint: boolPtr(true),
+				},
+			},
+			register: func(server *mcp.Server, tool *mcp.Tool, h *handler) {
+				mcp.AddTool(server, tool, h.getCommits)
+			},
+		},
+		{
+			tool: &mcp.Tool{
+				Name: "get_repo_activity",
+				Description: "Summarize what happened in a GitHub repository over a time window. " +
+					"Returns the window's commits with full messages, the aggregate per-file change " +
+					"set derived from comparing the window's boundary states, and a cost report. " +
+					"Designed to stay cheap: the request count does not grow per commit. Use this " +
+					"instead of get_commits with include_diffs when you want a repository's story " +
+					"rather than one person's commits.",
+				Annotations: &mcp.ToolAnnotations{
+					ReadOnlyHint:  true,
+					OpenWorldHint: boolPtr(true),
+				},
+			},
+			register: func(server *mcp.Server, tool *mcp.Tool, h *handler) {
+				mcp.AddTool(server, tool, h.getRepoActivity)
+			},
+		},
+	}
+}
+
+// New builds an MCP server exposing sting's read-only tools, configured from
+// cfg.
 func New(cfg config.Config) (*mcp.Server, error) {
 	h := &handler{cfg: cfg}
 
@@ -53,18 +112,9 @@ func New(cfg config.Config) (*mcp.Server, error) {
 		Version: "0.1.0",
 	}, nil)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_commits",
-		Description: "Retrieve a GitHub or GitLab user's commits over a time window. " +
-			"Returns the commits as structured data plus a Markdown summary so " +
-			"you can describe what the person has been working on.",
-		// The tool only reads from provider APIs; it never mutates anything.
-		// OpenWorldHint is true because it reaches an external service.
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:  true,
-			OpenWorldHint: boolPtr(true),
-		},
-	}, h.getCommits)
+	for _, def := range toolDefinitions() {
+		def.register(server, def.tool, h)
+	}
 
 	return server, nil
 }
@@ -73,8 +123,19 @@ func New(cfg config.Config) (*mcp.Server, error) {
 // single source of truth for which tools an installer may safely auto-approve,
 // so the install permissions snippet cannot drift from what the server marks
 // read-only. Every tool sting exposes is read-only by design.
+//
+// The list is derived from toolDefinitions rather than maintained by hand: with
+// more than one tool, two hand-synchronized lists would fail silently, which is
+// exactly what Principle I forbids.
 func ReadOnlyTools() []string {
-	return []string{"get_commits"}
+	defs := toolDefinitions()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		if def.tool.Annotations != nil && def.tool.Annotations.ReadOnlyHint {
+			names = append(names, def.tool.Name)
+		}
+	}
+	return names
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -85,7 +146,7 @@ func boolPtr(b bool) *bool { return &b }
 // exercise the getCommits panic-recovery path without depending on a real
 // provider client.
 var collectCommits = func(ctx context.Context, cfg config.Config, q model.Query) (model.Result, error) {
-	client, err := commitclient.New(cfg, q.Provider)
+	client, err := commitclient.New(cfg, q)
 	if err != nil {
 		return model.Result{}, err
 	}
@@ -140,6 +201,9 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 	}
 	if in.MaxCommits != nil {
 		req.MaxCommits = in.MaxCommits
+	}
+	if in.MaxRequests != nil {
+		req.MaxRequests = in.MaxRequests
 	}
 	if in.IncludePRs != nil {
 		req.IncludePullRequests = in.IncludePRs

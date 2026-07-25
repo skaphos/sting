@@ -64,6 +64,11 @@ type Config struct {
 	// IncludePullRequests augments repos/org discovery with open-PR branch
 	// commits by default (GitHub only).
 	IncludePullRequests bool `mapstructure:"include_prs"`
+	// MaxRequests caps the provider API requests a single query may consume
+	// (0 = no cap). It is a fixed default rather than one derived from
+	// remaining quota, so the same request cannot produce different results
+	// depending on unrelated prior activity.
+	MaxRequests int `mapstructure:"max_requests"`
 }
 
 // Default returns the built-in configuration as a Config value. This is the
@@ -86,6 +91,7 @@ func Default() Config {
 		IncludeFiles:    false,
 		IncludeDiffs:    false,
 		MaxDiffBytes:    model.DefaultMaxDiffBytes,
+		MaxRequests:     model.DefaultMaxRequests,
 	}
 }
 
@@ -113,6 +119,7 @@ func Defaults() map[string]any {
 		"include_diffs":   d.IncludeDiffs,
 		"max_diff_bytes":  d.MaxDiffBytes,
 		"include_prs":     d.IncludePullRequests,
+		"max_requests":    d.MaxRequests,
 	}
 }
 
@@ -135,6 +142,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.MaxDiffBytes < 0 {
 		return fmt.Errorf("max_diff_bytes must be >= 0, got %d", cfg.MaxDiffBytes)
+	}
+	if cfg.MaxRequests < 0 {
+		return fmt.Errorf("max_requests must be >= 0, got %d", cfg.MaxRequests)
 	}
 	if cfg.DefaultWindow != "" {
 		if _, err := ParseWindow(cfg.DefaultWindow); err != nil {

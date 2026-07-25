@@ -40,3 +40,10 @@ include_files: false         # fetch per-file change summaries
 include_diffs: false         # fetch bounded patch text; implies include_files
 max_diff_bytes: 60000        # per-commit patch byte cap when diffs are enabled
 include_prs: false           # discover open-PR branch commits (GitHub, scope=repos/org)
+
+# Cap on the provider API requests a single query may consume (0 = uncapped).
+# Reaching the cap yields the results gathered so far plus a disclosure, rather
+# than an abort. It is a fixed default rather than one derived from remaining
+# quota, so the same request cannot return different results depending on
+# unrelated prior activity.
+max_requests: 500

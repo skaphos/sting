@@ -7,12 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/mail"
 	"strings"
 	"time"
 
 	"github.com/google/go-github/v82/github"
+	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
 	"golang.org/x/sync/errgroup"
@@ -122,18 +124,46 @@ type Client struct {
 	gh          *github.Client
 	perPage     int
 	concurrency int
+
+	// budget counts and bounds provider requests when WithRequestBudget was
+	// supplied; nil otherwise. budgetCeiling/budgetEnabled are set by the
+	// option and consumed by New, which must install the transport before
+	// go-github wraps it.
+	budget        *apibudget.Transport
+	budgetCeiling int
+	budgetEnabled bool
 }
 
 // New builds a Client. token may be empty (unauthenticated, heavily rate
 // limited). baseURL, when set, targets a GitHub Enterprise instance and must be
 // the API root (e.g. "https://ghe.example.com/api/v3/"). perPage is clamped to
 // the API's 1-100 range.
-func New(token, baseURL string, perPage int) (*Client, error) {
+//
+// Options are applied before the HTTP client is constructed, because
+// WithRequestBudget installs a transport that everything else must be layered
+// on top of.
+func New(token, baseURL string, perPage int, opts ...Option) (*Client, error) {
+	c := &Client{concurrency: defaultConcurrency}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+
 	// Use a client with an explicit timeout rather than http.DefaultClient (which
 	// go-github's nil default uses) so a stalled request cannot hang a scan and so
 	// the global default client is never mutated. WithAuthToken preserves the
 	// Timeout while wrapping only the transport.
-	gh := github.NewClient(&http.Client{Timeout: httpTimeout})
+	httpClient := &http.Client{Timeout: httpTimeout}
+	if c.budgetEnabled {
+		// Wrap the default transport, then let go-github's auth wrapper sit on
+		// top: authenticated requests still pass through the counter, so the
+		// accounting covers every request rather than only anonymous ones.
+		c.budget = apibudget.NewTransport(http.DefaultTransport, c.budgetCeiling)
+		httpClient.Transport = c.budget
+	}
+
+	gh := github.NewClient(httpClient)
 	if token != "" {
 		gh = gh.WithAuthToken(token)
 	}
@@ -150,7 +180,32 @@ func New(token, baseURL string, perPage int) (*Client, error) {
 	if perPage > 100 {
 		perPage = 100
 	}
-	return &Client{gh: gh, perPage: perPage, concurrency: defaultConcurrency}, nil
+	c.gh = gh
+	c.perPage = perPage
+	return c, nil
+}
+
+// Cost reports what this client has consumed and the latest quota observation.
+// It returns a zero report when the client was built without
+// WithRequestBudget, and is safe to call at any point including after a
+// failure — a query that stopped early must still report what it spent.
+func (c *Client) Cost() model.CostReport {
+	if c.budget == nil {
+		return model.CostReport{}
+	}
+	return c.budget.Report()
+}
+
+// budgetRemaining reports how many more requests the ceiling permits, or
+// math.MaxInt when there is no ceiling. It is the check-before-dispatch
+// accessor: a fan-out asks what it can afford and dispatches only a batch it
+// can fully pay for, so which requests won a race never decides what ends up in
+// the result.
+func (c *Client) budgetRemaining() int {
+	if c.budget == nil {
+		return math.MaxInt
+	}
+	return c.budget.Remaining()
 }
 
 // Collect runs a query using its scope and returns the normalized result.
@@ -185,9 +240,6 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	default:
 		return model.Result{}, fmt.Errorf("unsupported scope %q", q.Scope)
 	}
-	if err != nil {
-		return model.Result{}, err
-	}
 
 	truncated := false
 	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
@@ -195,13 +247,46 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		truncated = true
 	}
 
+	// A discovery failure — a rate limit, a request-budget stop, a server error
+	// partway through pagination — used to discard every commit already
+	// gathered. The commits are real evidence regardless of why enumeration
+	// stopped, so they are returned alongside the error with Truncated set to
+	// mark the result incomplete (Constitution VI).
+	if err != nil {
+		if len(commits) > 0 {
+			truncated = true
+		}
+		return model.Result{
+			SchemaVersion: model.SchemaVersion,
+			GeneratedAt:   time.Now(),
+			Provider:      model.ProviderGitHub,
+			Author:        q.Author,
+			Scope:         q.Scope,
+			Since:         q.Since,
+			Until:         q.Until,
+			Count:         len(commits),
+			Commits:       commits,
+			Truncated:     truncated,
+			Skipped:       skipped,
+		}, err
+	}
+
 	// Enrich only the commits that survive the cap, and do it concurrently. The
 	// scope helpers above return commit metadata without per-commit detail; here
 	// each surviving commit gets its stats/files/diffs in a bounded fan-out. This
 	// runs after the clip so the extra truncation-probe commit is never fetched.
+	//
+	// A failure here used to discard every commit already gathered
+	// (`return model.Result{}, err`), which is the blindness Constitution VI
+	// forbids: the commits are real evidence whether or not their per-commit
+	// detail could be fetched. The result is now returned alongside the error,
+	// with Truncated set to signal that it is incomplete, so a caller can use
+	// the partial evidence instead of throwing it away.
+	var enrichErr error
 	if needsDetail(q) {
-		if err := c.enrichDetails(ctx, commits, q); err != nil {
-			return model.Result{}, err
+		enrichErr = c.enrichDetails(ctx, commits, q)
+		if enrichErr != nil {
+			truncated = true
 		}
 	}
 
@@ -217,7 +302,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		Commits:       commits,
 		Truncated:     truncated,
 		Skipped:       skipped,
-	}, nil
+	}, enrichErr
 }
 
 // searchByAuthor uses GitHub's global commit search index.
@@ -231,11 +316,14 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 	var out []model.Commit
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, fmt.Errorf("search commits: exceeded max pages (%d)", maxPages)
+			return out, fmt.Errorf("search commits: exceeded max pages (%d)", maxPages)
 		}
 		res, resp, err := c.gh.Search.Commits(ctx, query, opts)
 		if err != nil {
-			return nil, apiError("search commits", err)
+			// Return the pages already gathered: a stop partway through
+			// discovery still produced real evidence, and discarding it is the
+			// blindness Constitution VI forbids.
+			return out, apiError("search commits", err)
 		}
 		for _, cr := range res.Commits {
 			out = append(out, fromSearchResult(cr))
@@ -263,17 +351,17 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 	for _, target := range q.Repos {
 		owner, repo, ok := splitRepo(target)
 		if !ok {
-			return nil, fmt.Errorf("invalid repo %q (want owner/repo)", target)
+			return out, fmt.Errorf("invalid repo %q (want owner/repo)", target)
 		}
 		repoQuery := remainingQuery(q, len(out))
 		if repoQuery.MaxCommits == 0 && q.MaxCommits > 0 {
 			return out, nil
 		}
 		commits, err := c.collectRepo(ctx, owner, repo, repoQuery)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, commits...)
+		if err != nil {
+			return out, err
+		}
 		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 			break
 		}
@@ -300,11 +388,11 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, []
 	)
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, nil, fmt.Errorf("list org repos %s: exceeded max pages (%d)", q.Org, maxPages)
+			return out, skipped, fmt.Errorf("list org repos %s: exceeded max pages (%d)", q.Org, maxPages)
 		}
 		repos, resp, err := c.gh.Repositories.ListByOrg(ctx, q.Org, opts)
 		if err != nil {
-			return nil, nil, apiError("list org repos "+q.Org, err)
+			return out, skipped, apiError("list org repos "+q.Org, err)
 		}
 		for _, r := range repos {
 			full := r.GetFullName()
@@ -317,14 +405,14 @@ func (c *Client) listOrg(ctx context.Context, q model.Query) ([]model.Commit, []
 				return out, skipped, nil
 			}
 			commits, err := c.collectRepo(ctx, owner, repo, repoQuery)
+			out = append(out, commits...)
 			if err != nil {
 				if reason, skip := skipRepoReason(err); skip {
 					skipped = append(skipped, model.SkippedRepo{Repo: full, Reason: reason})
 					continue
 				}
-				return nil, nil, err
+				return out, skipped, err
 			}
-			out = append(out, commits...)
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, skipped, nil
 			}
@@ -349,7 +437,7 @@ func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Qu
 	seen := map[string]bool{}
 	commits, err := c.listRepoCommits(ctx, owner, repo, q, seen)
 	if err != nil {
-		return nil, err
+		return commits, err
 	}
 	if q.IncludePullRequests {
 		// Keep PR discovery within the per-repo cap: the default-branch listing
@@ -366,10 +454,10 @@ func (c *Client) collectRepo(ctx context.Context, owner, repo string, q model.Qu
 			prQuery.MaxCommits = remaining
 		}
 		prCommits, err := c.pullRequestCommits(ctx, owner, repo, prQuery, seen)
-		if err != nil {
-			return nil, err
-		}
 		commits = append(commits, prCommits...)
+		if err != nil {
+			return commits, err
+		}
 	}
 	return commits, nil
 }
@@ -385,11 +473,11 @@ func (c *Client) listRepoCommits(ctx context.Context, owner, repo string, q mode
 	var out []model.Commit
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, fmt.Errorf("list commits %s: exceeded max pages (%d)", full, maxPages)
+			return out, fmt.Errorf("list commits %s: exceeded max pages (%d)", full, maxPages)
 		}
 		commits, resp, err := c.gh.Repositories.ListCommits(ctx, owner, repo, opts)
 		if err != nil {
-			return nil, apiError("list commits "+full, err)
+			return out, apiError("list commits "+full, err)
 		}
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
@@ -427,14 +515,14 @@ func (c *Client) pullRequestCommits(ctx context.Context, owner, repo string, q m
 		}
 		prs, resp, err := c.gh.PullRequests.List(ctx, owner, repo, prOpts)
 		if err != nil {
-			return nil, apiError("list pull requests "+full, err)
+			return out, apiError("list pull requests "+full, err)
 		}
 		for _, pr := range prs {
 			commits, err := c.prBranchCommits(ctx, owner, repo, pr.GetNumber(), q, seen)
-			if err != nil {
-				return nil, err
-			}
 			out = append(out, commits...)
+			if err != nil {
+				return out, err
+			}
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, nil
 			}
@@ -460,7 +548,7 @@ func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number
 		}
 		commits, resp, err := c.gh.PullRequests.ListCommits(ctx, owner, repo, number, opts)
 		if err != nil {
-			return nil, apiError(fmt.Sprintf("list pr commits %s#%d", full, number), err)
+			return out, apiError(fmt.Sprintf("list pr commits %s#%d", full, number), err)
 		}
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
@@ -741,6 +829,39 @@ func fromRepoCommit(repoFull string, rc *github.RepositoryCommit) model.Commit {
 		cm.AuthorName = a.GetName()
 		cm.Email = a.GetEmail()
 		cm.Date = a.GetDate().Time
+	}
+	return cm
+}
+
+// fromRepoActivityCommit converts a list-commits entry into an ActivityCommit,
+// capturing the two things fromRepoCommit necessarily discards: the parent SHAs
+// and the committer date.
+//
+// Both are already present in the *list* response — GitHub populates Parents
+// there, not only on commit detail (research R1) — which is what makes boundary
+// resolution cost zero extra requests. model.Commit cannot carry them because it
+// is pinned by model.SchemaVersion, so the activity path gets its own type
+// rather than the shared one gaining fields.
+func fromRepoActivityCommit(repoFull string, rc *github.RepositoryCommit) model.ActivityCommit {
+	cm := model.ActivityCommit{
+		SHA:     rc.GetSHA(),
+		URL:     rc.GetHTMLURL(),
+		Author:  rc.GetAuthor().GetLogin(),
+		Repo:    repoFull,
+		Message: rc.GetCommit().GetMessage(),
+	}
+	if a := rc.GetCommit().GetAuthor(); a != nil {
+		cm.AuthorName = a.GetName()
+		cm.Email = a.GetEmail()
+		cm.AuthorDate = a.GetDate().Time
+	}
+	if c := rc.GetCommit().GetCommitter(); c != nil {
+		cm.CommitterDate = c.GetDate().Time
+	}
+	for _, p := range rc.Parents {
+		if sha := p.GetSHA(); sha != "" {
+			cm.ParentSHAs = append(cm.ParentSHAs, sha)
+		}
 	}
 	return cm
 }

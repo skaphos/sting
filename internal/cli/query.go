@@ -49,6 +49,7 @@ func registerQueryFlags(cmd *cobra.Command) {
 	f.Bool("files", false, "include per-file change summaries")
 	f.Bool("diffs", false, "include full file patches (implies --files)")
 	f.Int("max-diff-bytes", 0, "per-commit patch byte cap when --diffs is set (0 = config default)")
+	f.Int("max-requests", 0, "cap provider requests for this run (0 = uncapped; default from config)")
 	f.Bool("prs", false, "also discover commits on open pull-request branches (scope=repos|org, GitHub only)")
 }
 
@@ -101,6 +102,10 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 		maxDiffBytes, _ := f.GetInt("max-diff-bytes")
 		req.MaxDiffBytes = &maxDiffBytes
 	}
+	if f.Changed("max-requests") {
+		maxRequests, _ := f.GetInt("max-requests")
+		req.MaxRequests = &maxRequests
+	}
 	if f.Changed("prs") {
 		prs, _ := f.GetBool("prs")
 		req.IncludePullRequests = &prs
@@ -116,7 +121,7 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	client, err := commitclient.New(cfg, q.Provider)
+	client, err := commitclient.New(cfg, q)
 	if err != nil {
 		return err
 	}

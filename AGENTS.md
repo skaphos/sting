@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 sting queries a GitHub or GitLab user's commits over a time window, as a local
-CLI or as an MCP server exposing a single read-only `get_commits` tool. It is
+CLI or as an MCP server exposing two read-only tools, `get_commits` and
+`get_repo_activity`. It is
 read-only by design and uses dedicated provider PATs kept separate from ambient
 provider tokens.
 
@@ -46,7 +47,9 @@ Application layer (internal):
 - `internal/cli/`: Cobra command tree (`query`, `auth`, `init`, `mcp`, `install`,
   `uninstall`, `version`) and viper wiring.
 - `internal/commitclient/`: provider client selection shared by CLI and MCP.
-- `internal/mcpserver/`: MCP server; the read-only `get_commits` tool.
+- `internal/mcpserver/`: MCP server; the read-only `get_commits` and
+  `get_repo_activity` tools. Tool definitions live in one slice that both
+  registration and `ReadOnlyTools()` derive from (ADR 0010).
 - `internal/mcpinstall/`: per-runtime install adapters (Claude, Codex, OpenCode,
   Grok) with atomic, format-preserving config writes.
 - `internal/render/`: JSON and Markdown rendering.
@@ -100,7 +103,7 @@ Tasks run without globally installing tools (Task is pinned in `tools/`):
 
 - sting only reads from GitHub and GitLab. Do not add tools or commands that mutate
   repositories, issues, or any remote state.
-- `get_commits` is annotated `ReadOnlyHint: true`; `mcpserver.ReadOnlyTools()`
+- Every tool is annotated `ReadOnlyHint: true`; `mcpserver.ReadOnlyTools()`
   is the single source of truth the installer's auto-approve list derives from.
   Keep that invariant — every exposed tool must be read-only.
 - Authentication uses sting's own PAT keys (`token` / `STING_TOKEN` for GitHub,
