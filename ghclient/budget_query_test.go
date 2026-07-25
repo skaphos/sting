@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v82/github"
+	"github.com/google/go-github/v84/github"
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/model"
 )

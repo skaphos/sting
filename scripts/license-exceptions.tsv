@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+#
+# Modules whose license go-licenses cannot classify automatically.
+#
+# go-licenses (v2.0.1, the latest release) hard-fails `save` on any package it
+# classifies as "unknown", which would block notice regeneration entirely. For
+# each module listed here we skip go-licenses' own detection and record the
+# license ourselves: the SPDX identifier below is used in runtime-report.csv and
+# the module's license file is copied into third_party_licenses/runtime/.
+#
+# Only add a module here after manually reading its license file and confirming
+# the SPDX identifier. Re-verify on every version bump.
+#
+# Columns (tab-separated): module<TAB>spdx-id<TAB>license-file<TAB>reason
+github.com/segmentio/asm	MIT-0	LICENSE	MIT No Attribution; go-licenses v2.0.1 has no MIT-0 classifier
