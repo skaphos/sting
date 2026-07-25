@@ -32,11 +32,18 @@ Or install from source:
 go install github.com/skaphos/sting/cmd/sting@latest
 ```
 
+`sting version` reports the installed module version for this path — the binary reads the version
+the Go toolchain records, so it is not limited to release builds.
+
 Or build from this repo:
 
 ```sh
 go -C tools tool task build      # -> ./sting
 ```
+
+A local build reports a pseudo-version and the revision it was built from, marked `(modified)` when
+the working tree is dirty. A build made with `-buildvcs=false` records nothing, and `sting version`
+says so rather than inventing a value.
 
 ## Getting started
 

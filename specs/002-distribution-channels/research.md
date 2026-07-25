@@ -23,14 +23,23 @@ produced, and the fallback must read each honestly:
 | --- | --- | --- |
 | `go install github.com/skaphos/sting/cmd/sting@v0.7.0` | `v0.7.0` | absent |
 | `go install ...@latest` | resolved tag, e.g. `v0.7.0` | absent |
-| `go build` inside the repo | `(devel)` | `vcs.revision`, `vcs.time`, `vcs.modified` present |
-| `go build` outside a VCS tree | `(devel)` | absent |
+| `go build` inside the repo | pseudo-version, e.g. `v1.0.1-0.20260725190301-9ab1f886b1f9+dirty` | `vcs.revision`, `vcs.time`, `vcs.modified` present |
+| `go build -buildvcs=false`, or outside a VCS tree | `(devel)` | absent |
 | GoReleaser | ldflags win before any of this | — |
 
+**Verified empirically against Go 1.26.5 rather than assumed.** An earlier draft of this table
+claimed a repo build yields `(devel)`; that is pre-1.24 behavior. Current toolchains synthesize a
+pseudo-version encoding the base version, build timestamp, revision, and a `+dirty` suffix — more
+informative than `(devel)`, and it means tier 2 rather than tier 3 handles the common local build.
+`(devel)` still occurs when VCS stamping is off, so tier 3 remains reachable and tested.
+
 The module-proxy path is the one the README recommends and the one issue #121 calls out; it
-yields a real version but no revision. The local-build path is the inverse. So the two sources
-are complementary rather than ranked, and `Main.Version == "(devel)"` must be treated as *not a
-version* — reporting `(devel)` to a user is the same defect as reporting `dev`.
+yields a real version but no revision. The local-build path carries both. The two sources are
+therefore complementary rather than ranked, and `Main.Version == "(devel)"` must be treated as
+*not a version* — reporting `(devel)` to a user is the same defect as reporting `dev`.
+
+The defect is reproducible today: `go install github.com/skaphos/sting/cmd/sting@v1.0.0` — the
+currently published release — prints `sting dev`.
 
 `vcs.modified == "true"` is what satisfies FR-002's dirty-tree requirement.
 
