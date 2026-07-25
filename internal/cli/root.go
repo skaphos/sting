@@ -66,7 +66,7 @@ func init() {
 	registerQueryFlags(queryCmd)
 	registerActivityFlags(activityCmd)
 
-	rootCmd.AddCommand(queryCmd, activityCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
+	rootCmd.AddCommand(queryCmd, activityCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, updateCmd, authCmd, initCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config
@@ -138,12 +138,40 @@ func loadConfig() (config.Config, error) {
 	return cfg, nil
 }
 
+// exitError carries a specific exit status out of a command. Commands whose
+// outcomes are meant to be scripted against -- `update` distinguishes a
+// verification failure from a package-managed refusal -- return one of these
+// instead of relying on the generic status 1.
+//
+// An empty message means the command has already explained itself on stdout and
+// Execute should exit quietly.
+type exitError struct {
+	code    int
+	message string
+}
+
+func (e *exitError) Error() string { return e.message }
+
+// ExitCode reports the status Execute should exit with.
+func (e *exitError) ExitCode() int { return e.code }
+
 // Execute runs the root command and exits with a shell-friendly status.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "sting: "+err.Error())
-		os.Exit(1)
+	err := rootCmd.Execute()
+	if err == nil {
+		return
 	}
+
+	var coder interface{ ExitCode() int }
+	if errors.As(err, &coder) {
+		if msg := err.Error(); msg != "" {
+			fmt.Fprintln(os.Stderr, "sting: "+msg)
+		}
+		os.Exit(coder.ExitCode())
+	}
+
+	fmt.Fprintln(os.Stderr, "sting: "+err.Error())
+	os.Exit(1)
 }
 
 func must(err error) {

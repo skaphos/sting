@@ -95,35 +95,35 @@ command is printed and nothing is written.
 
 ### Setup for User Story 2
 
-- [ ] T012 [US2] Add `github.com/sigstore/sigstore-go` to `go.mod` and run `go mod tidy`
-- [ ] T013 [US2] Regenerate third-party notices with `go -C tools tool task notices` (constitution: required whenever `go.mod`/`go.sum` changes)
+- [X] T012 [US2] Add `github.com/sigstore/sigstore-go` to `go.mod` and run `go mod tidy`
+- [X] T013 [US2] Regenerate third-party notices with `go -C tools tool task notices` (constitution: required whenever `go.mod`/`go.sum` changes)
 
 ### Tests for User Story 2 (REQUIRED) ⚠️
 
-- [ ] T014 [P] [US2] Ownership classification tests for Homebrew, RPM, dpkg, Go toolchain, unmanaged, and undeterminable in `internal/selfupdate/ownership_test.go`, using an injected executable resolver and stubbed command runner (data-model.md §2)
-- [ ] T015 [P] [US2] Symlink-resolution test proving a cellar-linked binary classifies as Homebrew, not unmanaged, in `internal/selfupdate/ownership_test.go` (spec edge case)
-- [ ] T016 [P] [US2] **Negative test: valid signature, wrong signer identity is rejected** in `internal/selfupdate/verify_test.go` (FR-010, SC-013) — the single most important test in this feature
-- [ ] T017 [P] [US2] Checksum-mismatch test asserting the installed binary is byte-identical afterwards in `internal/selfupdate/verify_test.go` (FR-011)
-- [ ] T018 [P] [US2] Test that no flag or environment variable can skip verification in `internal/selfupdate/verify_test.go` (FR-012)
-- [ ] T019 [P] [US2] Release-resolution tests over `httptest` covering latest, explicit tag, draft/pre-release exclusion, tag-not-found, assets-not-yet-published, and no-asset-for-platform in `internal/selfupdate/release_test.go` (FR-020, spec edge cases)
-- [ ] T020 [P] [US2] Atomic-replace tests in `t.TempDir()` covering success, interrupted replace leaving exactly one complete binary, and unwritable directory in `internal/selfupdate/replace_test.go` (FR-013, FR-018)
-- [ ] T021 [P] [US2] Exit-code contract tests for every row of the table in contracts/cli-update.md in `internal/cli/update_test.go`
-- [ ] T022 [P] [US2] Test that no command other than `update` contacts a release or version endpoint in `internal/cli/update_test.go` (FR-007, SC-005)
-- [ ] T023 [P] [US2] Test that the update path sends no credential and does not read `GITHUB_TOKEN`/`GH_TOKEN`/`STING_TOKEN` in `internal/selfupdate/release_test.go` (Principle IV, FR-019)
+- [X] T014 [P] [US2] Ownership classification tests for Homebrew, RPM, dpkg, Go toolchain, unmanaged, and undeterminable in `internal/selfupdate/ownership_test.go`, using an injected executable resolver and stubbed command runner (data-model.md §2)
+- [X] T015 [P] [US2] Symlink-resolution test proving a cellar-linked binary classifies as Homebrew, not unmanaged, in `internal/selfupdate/ownership_test.go` (spec edge case)
+- [X] T016 [P] [US2] **Negative test: valid signature, wrong signer identity is rejected** in `internal/selfupdate/verify_test.go` (FR-010, SC-013) — the single most important test in this feature
+- [X] T017 [P] [US2] Checksum-mismatch test asserting the installed binary is byte-identical afterwards in `internal/selfupdate/verify_test.go` (FR-011)
+- [X] T018 [P] [US2] Test that no flag or environment variable can skip verification in `internal/selfupdate/verify_test.go` (FR-012)
+- [X] T019 [P] [US2] Release-resolution tests over `httptest` covering latest, explicit tag, draft/pre-release exclusion, tag-not-found, assets-not-yet-published, and no-asset-for-platform in `internal/selfupdate/release_test.go` (FR-020, spec edge cases)
+- [X] T020 [P] [US2] Atomic-replace tests in `t.TempDir()` covering success, interrupted replace leaving exactly one complete binary, and unwritable directory in `internal/selfupdate/replace_test.go` (FR-013, FR-018)
+- [X] T021 [P] [US2] Exit-code contract tests for every row of the table in contracts/cli-update.md in `internal/cli/update_test.go`
+- [X] T022 [P] [US2] Test that no command other than `update` contacts a release or version endpoint in `internal/cli/update_test.go` (FR-007, SC-005)
+- [X] T023 [P] [US2] Test that the update path sends no credential and does not read `GITHUB_TOKEN`/`GH_TOKEN`/`STING_TOKEN` in `internal/selfupdate/release_test.go` (Principle IV, FR-019)
 
 ### Implementation for User Story 2
 
-- [ ] T024 [P] [US2] Implement release resolution and asset download in `internal/selfupdate/release.go` with an injectable HTTP client (FR-020, data-model.md §3)
-- [ ] T025 [P] [US2] Implement ownership classification in `internal/selfupdate/ownership.go` per the ordered table in data-model.md §2, with injectable executable resolver and command runner (FR-008)
-- [ ] T026 [US2] Implement in-process Sigstore verification in `internal/selfupdate/verify.go` using `sigstore-go`, pinning issuer `https://token.actions.githubusercontent.com` and the release-workflow SAN pattern (FR-009, FR-010; research §2)
-- [ ] T027 [US2] Implement the four-step verification order — bundle over `checksums.txt`, identity pin, digest lookup, artifact hash — in `internal/selfupdate/verify.go` (data-model.md §4)
-- [ ] T028 [US2] Implement atomic replacement in `internal/selfupdate/replace.go` (temp file in the target directory, then rename) (FR-013)
-- [ ] T029 [US2] Implement the platform-gated variant in `internal/selfupdate/replace_windows.go`: rename-aside plus later cleanup, disabled pending Authenticode signing (FR-006, FR-013)
-- [ ] T030 [US2] Implement `Plan` resolution and the `Action` enum in `internal/selfupdate/plan.go` so `--check` and a real run share one decision path (FR-014, data-model.md §3)
-- [ ] T031 [US2] Create `internal/cli/update.go` as a thin Cobra command with `--check` and `--version`, mapping each `Action` to its exit code per contracts/cli-update.md (FR-006, FR-014, FR-016)
-- [ ] T032 [US2] Register `updateCmd` in `internal/cli/root.go`
-- [ ] T033 [US2] Write `docs/adr/0011-self-update-trust-model.md` recording verify-before-replace, the pinned signer identity, defer-to-package-manager, and the Windows gate (constitution: ADR for architecturally significant decisions)
-- [ ] T034 [US2] Document the upgrade path per install channel in `README.md` (FR-043)
+- [X] T024 [P] [US2] Implement release resolution and asset download in `internal/selfupdate/release.go` with an injectable HTTP client (FR-020, data-model.md §3)
+- [X] T025 [P] [US2] Implement ownership classification in `internal/selfupdate/ownership.go` per the ordered table in data-model.md §2, with injectable executable resolver and command runner (FR-008)
+- [X] T026 [US2] Implement in-process Sigstore verification in `internal/selfupdate/verify.go` using `sigstore-go`, pinning issuer `https://token.actions.githubusercontent.com` and the release-workflow SAN pattern (FR-009, FR-010; research §2)
+- [X] T027 [US2] Implement the four-step verification order — bundle over `checksums.txt`, identity pin, digest lookup, artifact hash — in `internal/selfupdate/verify.go` (data-model.md §4)
+- [X] T028 [US2] Implement atomic replacement in `internal/selfupdate/replace.go` (temp file in the target directory, then rename) (FR-013)
+- [X] T029 [US2] Implement the platform-gated variant in `internal/selfupdate/replace_windows.go`: rename-aside plus later cleanup, disabled pending Authenticode signing (FR-006, FR-013)
+- [X] T030 [US2] Implement `Plan` resolution and the `Action` enum in `internal/selfupdate/plan.go` so `--check` and a real run share one decision path (FR-014, data-model.md §3)
+- [X] T031 [US2] Create `internal/cli/update.go` as a thin Cobra command with `--check` and `--version`, mapping each `Action` to its exit code per contracts/cli-update.md (FR-006, FR-014, FR-016)
+- [X] T032 [US2] Register `updateCmd` in `internal/cli/root.go`
+- [X] T033 [US2] Write `docs/adr/0011-self-update-trust-model.md` recording verify-before-replace, the pinned signer identity, defer-to-package-manager, and the Windows gate (constitution: ADR for architecturally significant decisions)
+- [X] T034 [US2] Document the upgrade path per install channel in `README.md` (FR-043)
 
 **Checkpoint**: `sting update` verifies, defers, or refuses correctly on linux and darwin; gated on Windows.
 

@@ -13,3 +13,4 @@ Supersede an accepted record with a new one rather than rewriting it.
 - [0008 — OAuth App authentication and multi-provider credential storage](0008-oauth-app-authentication.md) (Proposed)
 - [0009 — GoReleaser owns the GitHub release](0009-goreleaser-owns-the-github-release.md) (supersedes part of 0005)
 - [0010 — Multi-tool MCP server](0010-multi-tool-mcp-server.md) (supersedes the single-tool framing of 0001)
+- [0011 — Self-update trust model](0011-self-update-trust-model.md)
