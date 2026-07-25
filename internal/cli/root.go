@@ -64,8 +64,9 @@ func init() {
 	// Also register on the query subcommand so `sting query --author ...` works
 	// with the exact same flag surface (and satisfies documented usage).
 	registerQueryFlags(queryCmd)
+	registerActivityFlags(activityCmd)
 
-	rootCmd.AddCommand(queryCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
+	rootCmd.AddCommand(queryCmd, activityCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config

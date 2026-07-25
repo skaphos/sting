@@ -53,10 +53,21 @@ to the provider, or the base commit is wrong and the entire change set shifts.
 Recording both dates and disclosing which one bounded the window is the Principle VIII response —
 state the provider's semantics rather than paper over them.
 
-**Verification task (carry into implementation)**: confirm against the live API that list-commits
-`since`/`until` filter on committer date. `httptest` fixtures cannot verify provider semantics —
-they only prove sting handles a given response shape. If the behavior turns out to be author-date
-based, the only change needed is the label in the disclosure, not the design.
+**Verified against the live API (2026-07-25)**: list-commits `since`/`until` filter on the
+**committer date**. Confirmed with two commits in `torvalds/linux` whose author and committer dates
+fall on different days — maintainer-applied patches, where the divergence is routine:
+
+| Commit | Author date | Committer date | Present in author-date window | Present in committer-date window |
+|---|---|---|---|---|
+| `fbbaca9e` | 2026-07-23T13:44:50Z | 2026-07-24T14:30:17Z | no | yes |
+| `6273dd3f` | 2026-07-20T08:44:26Z | 2026-07-23T23:07:23Z | no | yes |
+
+Each commit appears **only** in the window bounding its committer date, and is absent from the
+window bounding its author date. `ActivityResult.WindowDateBasis` is therefore `"committer"`, and
+the result states so. The design is unchanged — this fixed a label, as anticipated.
+
+`httptest` fixtures cannot verify provider semantics (they only prove sting handles a given
+response shape), which is why this was checked against the live API rather than encoded as a test.
 
 **Alternatives considered**:
 
@@ -321,5 +332,5 @@ so both must clear the standard 80% gate; neither warrants a documented lower fl
 
 ## Unresolved
 
-None. R2 carries a live-API verification task, but its outcome changes only a disclosure label,
-not the design — so it does not block Phase 1 or implementation.
+None. R2's live-API verification task has been carried out (see R2): `since`/`until` filter on the
+committer date, so `WindowDateBasis` is `"committer"`. No decision remains open.

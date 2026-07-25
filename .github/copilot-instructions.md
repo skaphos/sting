@@ -1,7 +1,8 @@
 # GitHub Copilot Instructions for sting
 
 sting queries a GitHub user's commits over a time window, as a local CLI or as
-an MCP server exposing a single read-only `get_commits` tool over stdio. It is
+an MCP server exposing two read-only tools, `get_commits` and
+`get_repo_activity`, over stdio. It is
 read-only by design and authenticates with a dedicated GitHub PAT kept separate
 from the ambient `GITHUB_TOKEN`.
 
@@ -18,7 +19,7 @@ from the ambient `GITHUB_TOKEN`.
 
 - sting only reads from GitHub. Do not add tools or commands that mutate
   repositories, issues, pull requests, or any remote state.
-- Every exposed MCP tool must be read-only. `get_commits` is annotated
+- Every exposed MCP tool must be read-only. Each tool is annotated
   `ReadOnlyHint: true`, and `mcpserver.ReadOnlyTools()` is the single source of
   truth the installer's Claude auto-approve snippet derives from — keep them in
   lockstep.
@@ -33,7 +34,9 @@ from the ambient `GITHUB_TOKEN`.
   `config/` (settings, window/time parsing, `Resolve`), `ghclient/` (go-github
   wrapper + scope dispatch + normalization).
 - Application layer under `internal/`: `cli/` (Cobra + viper), `mcpserver/`
-  (MCP `get_commits`), `mcpinstall/` (runtime adapters), `render/` (JSON/Markdown).
+  (MCP `get_commits` + `get_repo_activity`), `mcpinstall/` (runtime adapters),
+  `render/` (JSON/Markdown), `apibudget/` (request accounting), `activity/`
+  (correlation + disclosure rules).
 - `cmd/sting/` is the thin entrypoint. User docs live in `README.md`; decisions
   in `docs/adr/`.
 

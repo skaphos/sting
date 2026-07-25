@@ -99,6 +99,13 @@ type Query struct {
 	// extra API calls (one PR list + one commit list per PR), so it is off by
 	// default. GitHub only; ignored for GitLab.
 	IncludePullRequests bool
+	// MaxRequests caps the provider API requests this query may consume
+	// (0 = no cap). Reaching the cap yields the partial results gathered so far
+	// rather than an abort.
+	//
+	// Query is a request type, not part of the serialized evidence contract, so
+	// adding a field here does not bump SchemaVersion.
+	MaxRequests int
 }
 
 // Commit is a normalized commit record independent of the GitHub API shape.

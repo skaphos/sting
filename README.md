@@ -7,9 +7,11 @@ LLM agent (or a terminal) in a consumable form.
 
 - **`sting init`** — guided first-time setup (strongly recommended).
 - **`sting auth`** — authenticate with GitHub or GitLab via OAuth (`auth github`, `auth gitlab`, `auth status`, `auth logout`). The verbose `auth login github` / `auth login gitlab` forms are also supported and behave identically.
-- **`sting mcp`** — runs an MCP server over stdio exposing a single, read-only
-  `get_commits` tool.
+- **`sting mcp`** — runs an MCP server over stdio exposing two read-only tools,
+  `get_commits` and `get_repo_activity`.
 - **`sting <query flags>`** — prints a Markdown or JSON report locally.
+- **`sting activity`** — summarizes what happened in one GitHub repository over
+  a window, without naming an author.
 - **`sting install` / `uninstall` / `install list`** — register the MCP server
   with your agent runtimes (Claude Code, Codex, OpenCode, Grok).
 
@@ -177,6 +179,63 @@ Run `sting --help` (or `sting <command> --help`) for the full flag list.
 Queries return at most 100 commits by default to avoid routine rate-limit
 pressure; pass `--max-commits 0` only when you intentionally want an exhaustive
 scan.
+
+Every query is also bounded by a request ceiling (`max_requests`, default 500).
+Reaching it returns the evidence gathered so far rather than aborting, so a
+bounded run still exits `0`.
+
+## Repository activity (`sting activity`)
+
+`sting query` answers "what did *this person* do". `sting activity` answers
+"what happened in *this repository*" — no author required:
+
+```sh
+# What happened in a repository over the last week.
+sting activity --repo skaphos/sting --window 7d
+
+# A specific branch and explicit bounds, as JSON.
+sting activity --repo skaphos/sting --ref release/1.x \
+  --since 2026-07-01 --until 2026-07-08 -o json
+
+# Check the cost before paying it. Gathers no evidence.
+sting activity --repo skaphos/sting --window 30d --estimate
+
+# Cap what a run may consume. A bounded run still exits 0.
+sting activity --repo skaphos/sting --window 90d --max-requests 50
+
+# Attribute changed paths to specific commits. Costs one request per commit.
+sting activity --repo skaphos/sting --window 7d --enrich-commits 5
+```
+
+The output has four parts: the window's commits with full messages, the
+aggregate per-file change set, the correlations between them, and a cost report.
+It stays cheap by construction — the request count grows with commit *pages*,
+not commit count, so a 250-commit window costs about five requests rather than
+about 250.
+
+### What it does not cover
+
+- **It is a net comparison.** The change set compares the window's start and end
+  states, so a file created and deleted inside the window, or edited and then
+  reverted, does not appear, and intermediate revisions are collapsed into one
+  net change. The commit list still shows that work; the change set does not.
+- **One reference at a time.** It covers a single branch or tag. Work on other
+  branches, forks, or unmerged pull requests is not included.
+- **`--author` narrows the commits, not the change set.** A boundary comparison
+  has no notion of authorship, so the change set covers every author who touched
+  the reference in the window. The result says so explicitly.
+- **Attribution is labeled.** Correlations are `observed` only when per-commit
+  data was actually fetched (`--enrich-commits`); otherwise they are `inferred`
+  from a declared rule, and paths matching no rule are left unattributed rather
+  than guessed at.
+- **GitHub only.** `--provider gitlab` is rejected with a specific message;
+  GitLab commit queries via `sting query` are unaffected.
+- **Windows are bounded by committer date**, which GitHub's API filters on. That
+  differs from author date after a rebase, cherry-pick, or amend; the result
+  records which basis was used.
+
+Every one of these limits is also emitted as a disclosure in the output, so an
+agent reading the result sees them rather than having to consult this document.
 
 ### Evidence depth
 

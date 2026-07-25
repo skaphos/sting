@@ -48,6 +48,9 @@ type Request struct {
 	MaxDiffBytes *int
 	// MaxCommits overrides the default when non-nil.
 	MaxCommits *int
+	// MaxRequests overrides the default when non-nil. An explicit 0 is
+	// meaningful (uncapped), which is why this is a pointer.
+	MaxRequests *int
 	// IncludePullRequests overrides the default when non-nil.
 	IncludePullRequests *bool
 }
@@ -166,6 +169,14 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		return model.Query{}, fmt.Errorf("max_commits must be >= 0, got %d", maxCommits)
 	}
 
+	maxRequests := cfg.MaxRequests
+	if req.MaxRequests != nil {
+		maxRequests = *req.MaxRequests
+	}
+	if maxRequests < 0 {
+		return model.Query{}, fmt.Errorf("max_requests must be >= 0, got %d", maxRequests)
+	}
+
 	includePRs := cfg.IncludePullRequests
 	if req.IncludePullRequests != nil {
 		includePRs = *req.IncludePullRequests
@@ -184,6 +195,7 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		IncludeDiffs:        includeDiffs,
 		MaxDiffBytes:        maxDiffBytes,
 		MaxCommits:          maxCommits,
+		MaxRequests:         maxRequests,
 		IncludePullRequests: includePRs,
 	}, nil
 }
