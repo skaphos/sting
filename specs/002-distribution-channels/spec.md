@@ -39,14 +39,45 @@ install, cannot upgrade, or cannot find the tool:
 Closing these is the work. The constraint that shapes *how* is recorded in the ADR's negative
 consequences and in [repokeeper ADR-0007][rk0007]: every channel added multiplies the
 silent-staleness surface. repokeeper's cask sat pinned at `0.6.0` across two releases because a
-release run died before the tap step and nothing said so. Going from four channels to nine means
-nine places a release can half-land. The mitigation is that all of them are fed by one release
+release run died before the tap step and nothing said so. A release publishes to two channels
+today — the release archives and the Homebrew cask — and to six once this feature lands, adding
+`.deb`, `.rpm`, the container image and the MCP registry. That is six places a release can
+half-land instead of two. The mitigation is that all of them bar one are fed by a single release
 invocation that fails as a unit — and where a channel cannot be held to that (the MCP registry),
-its outcome must be *reported*, not assumed.
+its outcome must be *verified*, not assumed.
 
 [adr0001]: https://github.com/skaphos/skaphos-resources/blob/main/DECISIONS/0001-distribution-channels-by-artifact-shape.md
 [adr0003]: ../../docs/adr/0003-multi-runtime-installer-and-readonly-safety.md
 [rk0007]: https://github.com/skaphos/repokeeper/blob/main/docs/adr/0007-release-binaries-and-homebrew.md
+
+## Clarifications
+
+### Session 2026-07-25
+
+- Q: Does the release run *report* which channels published, or *independently verify* that each
+  one landed? → A: Independently verify. A post-release step queries each channel — release
+  assets, the cask in `skaphos/homebrew-tools`, the container image on both architectures, the
+  registry entry — and fails the workflow when a required channel is missing or stale.
+  Confirmation comes from querying the channel, never from the publishing step's own report.
+- Q: Which MCP registry namespace does sting publish under, and how is ownership proven? →
+  A: The org-branded reverse-DNS namespace `io.skaphos`, published as `io.skaphos/sting`, with
+  ownership proven by a DNS TXT record on `skaphos.io`. Chosen over the GitHub-anchored
+  namespace deliberately: the identity is portable if the repository moves, at the accepted cost
+  of a DNS record and publishing credential that can lapse in the release path.
+- Q: What performs signature verification during self-update, given verification cannot be
+  skipped? → A: sting verifies in-process, requiring no tooling on the user's machine, and pins
+  the expected signer to sting's own release workflow identity and the GitHub Actions OIDC
+  issuer. An otherwise-valid signature from any other identity is rejected.
+- Q: Is Windows in scope for the update command? → A: Specified now, implemented behind the
+  Windows Authenticode signing gate. The rename-then-replace mechanism and its guarantees are
+  fully specified, but self-replacement stays disabled on Windows until release binaries are
+  Authenticode-signed; until then `update` on Windows reports the available version and exits
+  without writing. A Windows user is never asked to self-install an unsigned replacement.
+- Q: Is the container image built inside the single release invocation, or as a separate step? →
+  A: Inside the single invocation, from the same binaries as the archives and packages, so it
+  fails the release as a unit with every other channel. The MCP registry remains the only
+  exception to that rule, and a missing credential must fail the release rather than silently
+  skipping a channel.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -130,6 +161,10 @@ command prints that channel's upgrade command and changes nothing.
 8. **Given** a release that has proven bad, **When** the user asks to update to a named earlier
    version, **Then** that version is verified and installed by the same rules, so rollback is
    possible without leaving the tool.
+9. **Given** a Windows user while Windows release binaries are still unsigned, **When** they run
+   the update command, **Then** sting reports the latest available version and how to obtain it,
+   writes nothing, exits non-zero, and states that self-update is withheld pending Windows code
+   signing — so the refusal is legible as a deliberate gate rather than a broken command.
 
 ---
 
@@ -242,7 +277,10 @@ succeeds with a credential passed through the environment.
 - **Draft and pre-release versions.** Never selected as "latest"; reachable only by naming them
   explicitly.
 - **Replacing a running executable on Windows.** The platform will not permit overwriting a file
-  in use; the update must still leave the user with exactly one complete, working binary.
+  in use, so replacement renames the running file aside and writes the new binary at the original
+  path, cleaning up the displaced file on a later run. This path stays disabled until Windows
+  binaries are Authenticode-signed; the specified behavior is what activates when that gate
+  lifts, and a stale displaced file must never block startup in the meantime.
 - **A binary reached through a symlink** — including a Homebrew-style link into a versioned
   cellar — resolves to its real path before ownership is judged, so package-managed installs are
   not mistaken for hand-installed ones.
@@ -250,6 +288,13 @@ succeeds with a credential passed through the environment.
   guessing a path.
 - **Signature material present but unverifiable offline.** Verification requires network access;
   when it cannot complete, the update refuses rather than falling back to checksums alone.
+- **A valid signature from the wrong identity.** An artifact signed by a real but different
+  signer — another repository's workflow, or a fork's — must be rejected. This is the case an
+  unpinned verification silently accepts, so it is a required negative test, not a hypothetical.
+- **The signer identity changes legitimately.** If the release workflow's path or the repository
+  moves, previously shipped binaries pin an identity that no longer signs releases. The update
+  must fail with a message naming the identity mismatch and pointing at a manual install, rather
+  than appearing to be a tampering incident.
 - **Package install over an existing hand-placed binary at the same path.** The package manager's
   own conflict behavior governs; sting does not work around it, and the documentation says which
   wins.
@@ -259,7 +304,19 @@ succeeds with a credential passed through the environment.
   release *harder* to notice than it already is.
 - **Registry entry drifts from the release.** A registry entry naming a version that was never
   published, or missing the current one, is a stale-channel failure of the kind
-  repokeeper ADR-0007 records — the release run's reported outcome is what makes it visible.
+  repokeeper ADR-0007 records — post-release verification is what makes it visible.
+- **Verification cannot reach a channel.** A transient outage at the tap, the container registry
+  or the MCP registry must be distinguishable from a channel that genuinely did not publish;
+  verification retries before declaring a channel missing, so a third-party outage is not
+  reported as a failed release.
+- **The registry namespace's DNS proof lapses.** If the TXT record on `skaphos.io` is removed or
+  the publishing credential expires, registry publishing fails while every other channel
+  succeeds. Verification must report this as a registry-channel failure naming the DNS record and
+  the credential as the things to check, rather than as a generic authentication error — this is
+  the expiry surface accepted when the branded namespace was chosen over the GitHub-anchored one.
+- **A channel publishes the wrong version.** Verification confirms the version each channel is
+  serving, not merely that the channel responds — a cask still pinned to the previous release
+  responds successfully and is exactly the failure being guarded against.
 
 ## Requirements *(mandatory)*
 
@@ -282,7 +339,12 @@ succeeds with a credential passed through the environment.
 **Self-update**
 
 - **FR-006**: sting MUST provide an update command that upgrades the running binary to a
-  published release.
+  published release. Self-replacement MUST remain disabled on Windows until Windows release
+  binaries are Authenticode-signed; until then the command on Windows MUST report the latest
+  available version and how to obtain it, write nothing, exit non-zero, and state that
+  self-update is withheld because Windows binaries are not yet signed — so the behavior reads as
+  a deliberate gate rather than a defect. Every other requirement in this section describes the
+  behavior that becomes active on Windows once that gate lifts.
 - **FR-007**: No command other than the update command MAY contact a release or version endpoint,
   for any purpose, including background or opportunistic update checks.
 - **FR-008**: The update command MUST determine whether the running binary is managed by another
@@ -291,82 +353,115 @@ succeeds with a credential passed through the environment.
   and modify nothing.
 - **FR-009**: Before replacing anything, the update MUST verify the project's publisher signature
   over the release's checksum manifest, and MUST verify the downloaded artifact against that
-  manifest.
-- **FR-010**: The update MUST refuse and leave the installed binary unchanged if any verification
+  manifest. Verification MUST happen in-process and MUST NOT require any tool, binary, or runtime
+  to be present on the user's machine beyond sting itself.
+- **FR-010**: Verification MUST pin the expected signer to sting's own release workflow identity
+  and to the expected certificate issuer. A signature that is cryptographically valid but was
+  produced by any other identity MUST be rejected — an unpinned check accepts any signed artifact
+  and provides no protection.
+- **FR-011**: The update MUST refuse and leave the installed binary unchanged if any verification
   step fails, and MUST state which check failed.
-- **FR-011**: Verification MUST NOT be skippable by a flag, an environment variable, or any other
+- **FR-012**: Verification MUST NOT be skippable by a flag, an environment variable, or any other
   user-facing switch.
-- **FR-012**: The binary MUST be replaced atomically, such that an interruption at any point
-  leaves either the complete previous binary or the complete new one in place.
-- **FR-013**: The update command MUST offer a mode that reports what it would do — current
+- **FR-013**: The binary MUST be replaced atomically, such that an interruption at any point
+  leaves either the complete previous binary or the complete new one in place. Where the platform
+  forbids overwriting a running executable, replacement MUST be performed by renaming the running
+  file aside and writing the new binary at the original path; exactly one working binary MUST
+  exist at that path when the operation ends. The displaced file MUST be removed on a later run,
+  and its presence MUST never prevent sting from running.
+- **FR-014**: The update command MUST offer a mode that reports what it would do — current
   version, target version, install ownership, and outcome — without downloading or writing
   anything.
-- **FR-014**: A successful update MUST report the version it moved from and the version it moved
+- **FR-015**: A successful update MUST report the version it moved from and the version it moved
   to.
-- **FR-015**: The update command MUST accept an explicit target version, so a user can move to a
+- **FR-016**: The update command MUST accept an explicit target version, so a user can move to a
   known-good earlier release without leaving the tool.
-- **FR-016**: When the running version cannot be determined, the update MUST require an explicit
+- **FR-017**: When the running version cannot be determined, the update MUST require an explicit
   target version rather than assuming the binary is out of date.
-- **FR-017**: When replacement fails for want of filesystem permission, the failure MUST name the
+- **FR-018**: When replacement fails for want of filesystem permission, the failure MUST name the
   path and the reason and suggest the correct action, and sting MUST NOT attempt to escalate
   privileges.
-- **FR-018**: The update path MUST NOT transmit any user, host, or installation identifying
+- **FR-019**: The update path MUST NOT transmit any user, host, or installation identifying
   information beyond what fetching public release assets inherently requires.
-- **FR-019**: Draft and pre-release versions MUST NOT be selected as the update target unless
+- **FR-020**: Draft and pre-release versions MUST NOT be selected as the update target unless
   named explicitly.
 
 **Linux OS packages**
 
-- **FR-020**: Each release MUST publish `.deb` and `.rpm` packages for 64-bit Intel and 64-bit
+- **FR-021**: Each release MUST publish `.deb` and `.rpm` packages for 64-bit Intel and 64-bit
   ARM, built from the same binaries as that release's archives.
-- **FR-021**: Packages MUST install the binary onto the system `PATH` and MUST install the
+- **FR-022**: Packages MUST install the binary onto the system `PATH` and MUST install the
   license and third-party notice files to the location their packaging convention expects.
-- **FR-022**: Packages MUST declare complete metadata — maintainer, homepage, license, and
+- **FR-023**: Packages MUST declare complete metadata — maintainer, homepage, license, and
   description — consistent with the repository's other published artifacts.
-- **FR-023**: Packages MUST appear in the release's checksum manifest and MUST be covered by the
+- **FR-024**: Packages MUST appear in the release's checksum manifest and MUST be covered by the
   same signature and build-provenance attestation as every other artifact in that release.
-- **FR-024**: Installation documentation MUST state that no hosted package repository exists, so
+- **FR-025**: Installation documentation MUST state that no hosted package repository exists, so
   a `.deb` on a release page is not read as an implied apt repository.
 
 **MCP registry**
 
-- **FR-025**: The repository MUST carry a checked-in server description that names the server,
-  describes what it does, and states how it is run and what configuration it requires.
-- **FR-026**: That description MUST be validated against the registry's published schema in CI,
+- **FR-026**: The repository MUST carry a checked-in server description that names the server,
+  describes what it does, and states how it is run and what configuration it requires. The
+  server's canonical registry identity MUST be `io.skaphos/sting`, and that name is what MCP
+  clients use to refer to it.
+- **FR-027**: That description MUST be validated against the registry's published schema in CI,
   so an invalid entry fails before a release rather than at publish time.
-- **FR-027**: Each release MUST publish the entry to the MCP registry at the released version.
-- **FR-028**: A registry publish failure MUST be surfaced in the release run's output and MUST
+- **FR-028**: Each release MUST publish the entry to the MCP registry at the released version.
+  Publishing MUST prove ownership of the `io.skaphos` namespace by a DNS TXT record on
+  `skaphos.io`, and the credential it authenticates with MUST be organization-scoped rather than
+  tied to an individual's account, so the channel does not depend on one person's credential
+  remaining valid.
+- **FR-029**: A registry publish failure MUST be surfaced in the release run's output and MUST
   NOT be silent; it MUST NOT invalidate the remainder of the release, and it MUST be retryable
   without cutting a new release.
-- **FR-029**: The description MUST be updated in the same change as any change to the server's
+- **FR-030**: The description MUST be updated in the same change as any change to the server's
   advertised capabilities.
 
 **Container image**
 
-- **FR-030**: Each release MUST publish a container image for 64-bit Intel and 64-bit ARM Linux,
-  tagged with the release version and with a moving current tag.
-- **FR-031**: The image's default behavior when run with no arguments MUST be to start the MCP
+- **FR-031**: Each release MUST publish a container image for 64-bit Intel and 64-bit ARM Linux,
+  tagged with the release version and with a moving current tag. The image MUST be built and
+  pushed by the same release invocation that produces the archives and packages, from the same
+  binaries, so that a failure to publish it fails the release as a unit.
+- **FR-032**: The image's default behavior when run with no arguments MUST be to start the MCP
   server on its standard transport.
-- **FR-032**: The image MUST run as an unprivileged user and MUST contain no credentials or
+- **FR-033**: The image MUST run as an unprivileged user and MUST contain no credentials or
   configuration specific to any user or organization.
-- **FR-033**: The image MUST accept credentials and configuration through the environment, using
+- **FR-034**: The image MUST accept credentials and configuration through the environment, using
   the same names as the local binary.
-- **FR-034**: The image MUST carry an SBOM, a signature, and a build-provenance attestation
+- **FR-035**: The image MUST carry an SBOM, a signature, and a build-provenance attestation
   equivalent to those on the release archives.
-- **FR-035**: Documentation MUST show a container-based MCP client configuration alongside the
+- **FR-036**: Documentation MUST show a container-based MCP client configuration alongside the
   existing local-binary configuration.
 
 **Pipeline coherence and scope discipline**
 
-- **FR-036**: Every channel except the MCP registry MUST be produced by the single release
-  invocation, so a failure in any one of them fails the release as a unit rather than half-landing
-  it.
-- **FR-037**: The release run MUST report which channels published and which did not, so a
-  partially-landed release is visible without a user reporting it.
-- **FR-038**: No requirement in this feature may introduce a code path that writes to, or is
+- **FR-037**: Every channel except the MCP registry MUST be produced by the single release
+  invocation — archives, Linux packages, the Homebrew cask, and the container image alike — so a
+  failure in any one of them fails the release as a unit rather than half-landing it. The MCP
+  registry is the only permitted exception, for the reason stated in FR-029; no further channel
+  may be carved out without a recorded justification, because each carve-out reinstates the
+  half-landed-release failure mode this requirement exists to prevent.
+- **FR-038**: A missing or unusable credential MUST fail the release rather than silently
+  skipping the channel it belongs to. A channel that quietly drops out of a release that then
+  reports success is the failure mode ADR-0001 records for the macOS notarization secrets and
+  repokeeper ADR-0007 records for the Homebrew cask.
+- **FR-039**: After a release publishes, an independent verification step MUST confirm that each
+  channel actually landed at the released version — release assets present and checksummed, the
+  Homebrew cask updated in `skaphos/homebrew-tools`, the container image resolvable on both
+  architectures, and the registry entry at the released version. Confirmation MUST be obtained by
+  querying the channel, never by trusting the publishing step's own report of what it did.
+- **FR-040**: Verification MUST fail the release workflow when any channel other than the MCP
+  registry is missing or stale. A missing or stale registry entry MUST be surfaced as a distinct,
+  visible, non-blocking failure, consistent with FR-029.
+- **FR-041**: Verification MUST distinguish a channel that genuinely did not publish from a
+  transient failure to reach it, retrying before declaring a channel missing, so that an outage
+  at a third-party registry is not reported as a failed release.
+- **FR-042**: No requirement in this feature may introduce a code path that writes to, or is
   capable of writing to, any provider-side object; the read-only invariant and the derived
   auto-approve list remain unchanged.
-- **FR-039**: Installation and upgrade documentation MUST be updated for every channel this
+- **FR-043**: Installation and upgrade documentation MUST be updated for every channel this
   feature adds, and MUST make clear which upgrade path applies to which install path.
 
 ### Key Entities
@@ -400,19 +495,28 @@ succeeds with a credential passed through the environment.
   channel's correct upgrade command and modifies no file.
 - **SC-005**: Across sting's entire command surface, zero requests to release or version endpoints
   are issued by any command other than the update command.
-- **SC-006**: An interrupted update leaves a complete, runnable binary in 100% of trials, across
-  every supported platform.
+- **SC-006**: An interrupted update leaves a complete, runnable binary in 100% of trials, on every
+  platform where self-replacement is enabled.
 - **SC-007**: sting is resolvable by name in the MCP registry, at the current released version,
   within one release cycle of this change landing.
 - **SC-008**: An MCP client configured to run sting from the published container image completes
   a read-only commit query on both supported architectures with no local Go toolchain present.
-- **SC-009**: Every artifact in a release — archives, packages, and image — is covered by the
-  release's checksum manifest, signature and provenance attestation. Zero unsigned or unattested
-  artifacts ship.
-- **SC-010**: When any channel fails to publish, the release run's output names it. Zero releases
-  complete as apparently successful while a channel is missing.
+- **SC-009**: Every artifact in a release carries provenance appropriate to its form — archives
+  and Linux packages listed in the signed checksum manifest, the container image signed and
+  attested in the registry it is published to. Zero unsigned or unattested artifacts ship.
+- **SC-010**: Every published release is followed by an independent per-channel confirmation
+  obtained by querying each channel. A release in which a required channel did not land is marked
+  failed by that check rather than discovered by a user; zero releases complete as apparently
+  successful while a channel is missing.
 - **SC-011**: A user can move to a specific named earlier release through the update command,
   with the same verification applied.
+- **SC-012**: The update command completes on a machine carrying nothing but sting itself — no
+  signature-verification tool, no package manager, no language toolchain.
+- **SC-013**: An artifact carrying a cryptographically valid signature from any identity other
+  than sting's release workflow is rejected in 100% of attempts.
+- **SC-014**: While Windows release binaries are unsigned, zero Windows binaries are self-replaced
+  by the update command, and every Windows user who runs it is told the available version and why
+  self-update is withheld.
 
 ## Assumptions
 
@@ -422,7 +526,9 @@ succeeds with a credential passed through the environment.
   those channels is worse than not pushing it, and recommends sequencing Windows signing ahead of
   them. They are therefore deferred to separate work behind Authenticode signing, rather than
   shipped alongside these five channels. This is a scope decision taken from the issue's own
-  guidance, not a silent drop of a required channel.
+  guidance, not a silent drop of a required channel. Windows self-replacement sits behind the
+  same gate, so Authenticode signing unblocks three things at once — `winget`, `scoop`, and
+  `update` on Windows — which makes it the highest-leverage follow-up to this feature.
 - **Binaries installed by the Go toolchain are treated as externally managed** for the purposes of
   the update command, in the same class as Homebrew and system packages: sting prints the
   toolchain's own upgrade command rather than overwriting a file the toolchain placed. The ADR
@@ -441,6 +547,11 @@ succeeds with a credential passed through the environment.
 - **Release infrastructure stays as it is.** The release remains tag-triggered, driven by a single
   GoReleaser invocation, with release notes owned per [ADR 0009][adr0009] and version bumps per
   [ADR 0005][adr0005]. This feature adds outputs to that run; it does not restructure it.
+- **An in-binary signature-verification dependency is accepted and justified.** The constitution
+  requires external dependencies to be minimized and justified. The justification is that FR-012
+  makes verification unskippable, so delegating to an external tool would mean the update command
+  cannot run on a machine that lacks it — which is nearly every end user's machine. The
+  dependency buys a self-updater that works; the alternative is one that does not.
 - **The container image serves the MCP server use case.** It exists because Shape 3 requires a
   `docker`-runnable server; it is not positioned as a general-purpose way to run the CLI.
 - **Specification and implementation land on the same pull request**, per the request that
@@ -453,6 +564,10 @@ succeeds with a credential passed through the environment.
   their own decision record.
 - AUR packaging and a Nix flake. Optional under ADR-0001 and not expected.
 - Windows Authenticode signing, and the `winget` and `scoop` channels that depend on it.
+- **Enabling self-replacement on Windows.** Its behavior is fully specified here (FR-006,
+  FR-013), but the implementation is gated on Authenticode signing landing, so this feature ships
+  the gated refusal path on Windows rather than the replacement path. Lifting the gate is a
+  follow-up change that implements an already-specified behavior, not a new specification.
 - Homebrew core, Chocolatey, Snap and Flatpak — all deliberately excluded by ADR-0001.
 - Removing the Homebrew cask's quarantine hook. ADR-0001 keeps it, because a notarization ticket
   cannot be stapled to a bare binary in a tarball, and says removing it is a separate call backed
@@ -470,25 +585,29 @@ succeeds with a credential passed through the environment.
   release run whose failure semantics this feature tightens.
 - **The MCP registry's publishing interface and schema** — external, and the least stable
   dependency in this feature, which is why its failure mode is specified separately.
+- **DNS control over `skaphos.io`** — the `io.skaphos` namespace is proven by a TXT record on
+  that zone. Together with the publishing credential, this is a second expiry-and-rotation
+  surface in the release path, alongside the Apple Developer certificate ADR-0001 already flags.
+  Both fail quietly; post-release verification is what makes either visible.
 - **GitHub Container Registry** — the publish target for the container image.
 
 ## Constitution Alignment
 
 - **I. Read-Only by Design** — nothing here adds a provider-mutating path. The update command
-  writes only to sting's own binary on the local filesystem (FR-038).
+  writes only to sting's own binary on the local filesystem (FR-042).
 - **II. Evidence-Grade, Explainable Output** — the version command and the update command must
   both say what they know and why they refused; "failed" without a reason is a defect
-  (FR-004, FR-010, FR-017).
+  (FR-004, FR-011, FR-018).
 - **III. Deterministic, Reconstructible** — verification is mandatory and unskippable, and update
   behavior is a function of the release contents and the install location, not of ambient state
-  (FR-009, FR-011).
+  (FR-009, FR-012).
 - **IV. Explicit Configuration** — no implicit network calls and no ambient telemetry
-  (FR-007, FR-018).
+  (FR-007, FR-019).
 - **VII. Never a Second Source of Truth** — the binary is replaced atomically, and files owned by
-  another installer are never overwritten (FR-008, FR-012).
+  another installer are never overwritten (FR-008, FR-013).
 - **VIII. Technical Precision, Honest Scope** — the documentation must state that shipping a
   `.deb` is not an apt repository, and that Windows binaries remain unsigned
-  (FR-024, FR-039).
+  (FR-025, FR-043).
 - **Testing (non-negotiable)** — new behavior ships with direct test coverage in the same change,
   tests do not touch the network, and tests that touch the filesystem isolate `HOME` and
   `USERPROFILE`. The per-package coverage gate applies.

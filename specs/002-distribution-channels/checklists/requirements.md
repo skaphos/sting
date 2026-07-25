@@ -62,3 +62,29 @@ both channels are *recommended* rather than required under ADR-0001, and both ar
 Out of Scope with the reason.
 
 Validation run: 1 iteration, all items pass.
+
+## Re-validation after clarification session 2026-07-25
+
+Five clarifications were accepted and integrated. All 16 items re-evaluated: **16/16 → 16/16**,
+no state changes, no regressions.
+
+The clarifications made the spec materially more concrete, which is worth recording against
+item 1 above rather than letting the qualification quietly widen. Newly named in the spec are
+`io.skaphos/sting` and its DNS TXT ownership proof, the pinned signer identity (sting's release
+workflow and the GitHub Actions OIDC issuer), Authenticode as the gate on Windows self-update,
+and rename-then-replace as the mechanism where a running executable cannot be overwritten. Each
+is a *decision that was asked and answered*, not a design the spec is preempting — the namespace
+and the trust anchor are externally visible identities that cannot be deferred to planning, and
+the Windows mechanism is the only one the platform permits. Item 1 therefore still passes under
+its stated qualification, with a wider surface than at first pass.
+
+Item "Success criteria are technology-agnostic" likewise still passes: SC-012, SC-013 and SC-014
+were added, and each describes the user's environment or an observable outcome — a machine with
+no extra tooling, a rejected signature, a binary that was not replaced — rather than how sting
+achieves it.
+
+Two factual corrections were made during integration, unrelated to any clarification: the
+Problem section's channel count (now stated precisely as two channels today and six after this
+feature) and SC-009, which had claimed the container image would appear in the release checksum
+manifest. Images are not checksummed into that manifest; SC-009 now states the provenance
+appropriate to each artifact form.
