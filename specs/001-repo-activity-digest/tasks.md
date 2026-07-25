@@ -195,7 +195,7 @@ new and the pre-existing query paths.
 - [X] T057 Run `go -C tools tool task ci` and confirm lint, staticcheck, govulncheck, race-enabled tests, and the coverage gate all pass. `internal/apibudget` and `internal/activity` are pure logic and must clear the standard 80% gate — neither warrants a lower floor.
 - [X] T058 Execute every scenario in [quickstart.md](./quickstart.md) and confirm the Definition of Done checklist, paying particular attention to scenario 4 (boundary off-by-one), scenario 6 (no unearned `observed` attribution), and scenario 11 (determinism).
 - [X] T059 Verify the read-only invariant end to end: `sting install list` shows both tools in the auto-approve block, `tools/list` over stdio reports `readOnlyHint: true` for each, and no code path issues a non-GET request to a provider.
-- [ ] T060 Request Copilot review on the PR via the API (`POST pulls/{n}/requested_reviewers` with `copilot-pull-request-reviewer[bot]`) — the `gh --add-reviewer @copilot` form does not attach it.
+- [X] T060 Request Copilot review on the PR via the API (`POST pulls/{n}/requested_reviewers` with `copilot-pull-request-reviewer[bot]`) — the `gh --add-reviewer @copilot` form does not attach it.
 
 ---
 
