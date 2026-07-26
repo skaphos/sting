@@ -84,7 +84,17 @@ reported; build with stamping and confirm stamped values win.
 
 ---
 
-## Phase 4: User Story 2 — `sting update` (Priority: P2)
+## Phase 4: User Story 2 - `sting update` (Priority: P2) - DROPPED
+
+> **Every task in this phase was completed and then reverted.** `sting update` was built,
+> tested, and measured: verifying in-process cost +122% binary size (11 MB to 25 MB) and 62
+> extra module requirements, to serve one command. It was removed rather than weakened,
+> since a self-updater that skips verification is worse than none. Recorded as a deviation
+> from a required channel in
+> [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md).
+>
+> Tasks below stay marked `[X]` because the work genuinely happened; the code does not
+> ship. `go.mod` is byte-identical to `main`.
 
 **Goal**: Upgrade in place when sting owns the binary; refuse with the correct command when a
 package manager does. Verify before replacing, always.

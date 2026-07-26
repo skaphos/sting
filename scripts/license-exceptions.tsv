@@ -13,6 +13,3 @@
 #
 # Columns (tab-separated): module<TAB>spdx-id<TAB>license-file<TAB>reason
 github.com/segmentio/asm	MIT-0	LICENSE	MIT No Attribution; go-licenses v2.0.1 has no MIT-0 classifier
-github.com/cyberphone/json-canonicalization	Apache-2.0	LICENSE	Short-form Apache header (no full text); verified "Licensed under the Apache License, Version 2.0", Copyright 2018 Anders Rundgren
-github.com/in-toto/attestation	Apache-2.0	LICENSE	Short-form Apache header (no full text); verified "Licensed under the Apache License, Version 2.0", Copyright 2021 in-toto Developers
-github.com/in-toto/in-toto-golang	Apache-2.0	LICENSE	Short-form Apache header (no full text); verified "Licensed under the Apache License, Version 2.0", Copyright 2018 New York University

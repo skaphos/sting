@@ -63,18 +63,7 @@ says so rather than inventing a value.
 
 ## Upgrading
 
-`sting update` upgrades the running binary. It verifies that the release was
-published by sting's own release workflow before replacing anything, and there
-is no way to skip that check.
-
-```sh
-sting update              # upgrade to the latest release
-sting update --check      # report what would happen; write nothing
-sting update --version v1.0.0   # move to a specific release (rollback)
-```
-
-If another installer owns the binary, sting refuses to overwrite it and prints
-the command that will do the job properly:
+sting does not update itself. Upgrade through the channel you installed from:
 
 | Installed with | Upgrade with |
 | --- | --- |
@@ -82,15 +71,16 @@ the command that will do the job properly:
 | `.rpm` | `sudo dnf upgrade sting` |
 | `.deb` | download the next release's `.deb`, then `sudo dpkg -i` |
 | `go install` | `go install github.com/skaphos/sting/cmd/sting@latest` |
-| downloaded archive | `sting update` |
+| container image | `docker pull ghcr.io/skaphos/sting:latest` |
+| downloaded archive | download the next release's archive |
 
-`update` is the only command that contacts the network to check for a new
-version — nothing checks for updates in the background. It sends no credential,
-so the unauthenticated GitHub rate limit applies.
+`sting version` reports what you are running, so you can tell whether an upgrade
+is needed. Nothing in sting checks for updates in the background.
 
-Self-update is not enabled on Windows yet: those binaries are not Authenticode
-signed, and sting will not ask you to self-install an unsigned replacement. It
-reports the available version and where to download it.
+There is deliberately no `sting update` subcommand: verifying a release properly
+in-process would more than double the binary for every user, and shipping a
+self-updater that skips verification would be worse than shipping none. See
+[ADR 0011](docs/adr/0011-no-self-update-subcommand.md).
 
 ## Getting started
 

@@ -1,6 +1,15 @@
-# Contract: `sting update`
+# Contract: `sting update` — NOT SHIPPED
 
 **Feature**: [../spec.md](../spec.md) | **Date**: 2026-07-25
+
+> **This contract describes a command that does not exist.** It was specified, implemented
+> against this contract, and then dropped: verifying releases in-process cost +122% binary size
+> and 62 extra modules to serve one command. See
+> [ADR 0011](../../../docs/adr/0011-no-self-update-subcommand.md).
+>
+> It is retained because it is the specification a future implementation would have to meet,
+> and because ADR 0011's reasoning only makes sense against a concrete description of what was
+> given up. The `sting version` section at the end **did** ship.
 
 The ninth top-level command, alongside `query`, `activity`, `mcp`, `install`, `uninstall`,
 `version`, `auth`, `init`. Thin Cobra wrapper over `internal/selfupdate`.

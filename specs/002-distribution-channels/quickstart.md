@@ -54,48 +54,14 @@ go build -ldflags "-X github.com/skaphos/sting/internal/cli.Version=v9.9.9" \
 
 ---
 
-## US2 — `sting update` (P2)
+## US2 — `sting update` (P2) — NOT SHIPPED
 
-**Validates**: FR-006–FR-020, SC-003–SC-006, SC-011–SC-014. Contract:
-[contracts/cli-update.md](./contracts/cli-update.md).
+Built, measured, and dropped. See
+[ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md). There is nothing to validate.
 
-Unit coverage carries most of this — the seams in
-[data-model.md](./data-model.md#testability-seams) exist so none of it needs the network:
-
-```sh
-go test ./internal/selfupdate/... -race -v
-```
-
-Required cases, each mapping to a spec scenario:
-
-| Case | Expect | Exit |
-| --- | --- | --- |
-| Tampered archive (checksum mismatch) | binary untouched, failing step named | 1 |
-| **Valid signature, wrong identity** | rejected — the pin is the whole control (SC-013) | 1 |
-| Binary under a simulated Homebrew prefix | prints `brew upgrade --cask sting`, writes nothing | 2 |
-| Binary under a stubbed `rpm -qf` hit | prints the dnf command, writes nothing | 2 |
-| Binary under `$GOBIN` | prints the `go install` command | 2 |
-| Already latest | no download | 0 |
-| Unknown current version | refuses, demands `--version` | 4 |
-| No asset for platform | names platform and available assets | 4 |
-| Unwritable target directory | names path and permission, no escalation | 5 |
-| Interrupted mid-replace | exactly one complete binary | — |
-
-Manual smoke once a release exists:
-
-```sh
-sting update --check          # resolves plan, writes nothing
-sting update --version v0.7.0 # rollback path, same verification
-```
-
-**Verify no implicit network calls** (FR-007, SC-005) — the whole command surface must be silent:
-
-```sh
-go test ./internal/cli/... -run TestNoImplicitUpdateChecks -v
-```
-
-**Windows** (FR-006, SC-014): the gated path returns exit `3`, reports the available version, and
-writes nothing. Self-replacement stays disabled until Authenticode signing lands.
+The upgrade path it would have provided is documented per channel in `README.md`; the
+substitute check is simply that `sting version` reports something a user can compare against
+the latest release, which US1 above covers.
 
 ---
 
@@ -126,9 +92,6 @@ that image, not of the package.
 **Pass**: binary on `PATH`, reports the snapshot version, `LICENSE` /
 `THIRD_PARTY_NOTICES.md` / `third_party_licenses/` present under `/usr/share/doc/sting/`, the
 package database claims the binary, and removal leaves nothing behind.
-
-The `rpm -qf` check is doing double duty: it is also what `sting update` relies on to detect an
-RPM-owned install and refuse to overwrite it.
 
 ```sh
 grep -c '\.deb\|\.rpm' dist/checksums.txt    # packages are in the manifest (FR-024)
@@ -219,11 +182,11 @@ on mismatch except the MCP registry, which warns (FR-029, FR-040).
 
 ## Traceability
 
-| Story | Requirements | Success criteria |
-| --- | --- | --- |
-| US1 | FR-001–FR-005 | SC-001 |
-| US2 | FR-006–FR-020 | SC-003–SC-006, SC-011–SC-014 |
-| US3 | FR-021–FR-025 | SC-002 |
-| US4 | FR-026–FR-030 | SC-007 |
-| US5 | FR-031–FR-036 | SC-008 |
-| Cross-cutting | FR-037–FR-043 | SC-009, SC-010 |
+| Story | Requirements | Success criteria | Status |
+| --- | --- | --- | --- |
+| US1 | FR-001–FR-005 | SC-001 | shipped |
+| US2 | FR-006–FR-020 | SC-003–SC-006, SC-011–SC-014 | *(not shipped — ADR 0011)* |
+| US3 | FR-021–FR-025 | SC-002 | shipped |
+| US4 | FR-026–FR-030 | SC-007 | shipped |
+| US5 | FR-031–FR-036 | SC-008 | shipped |
+| Cross-cutting | FR-037–FR-043 | SC-009, SC-010 | shipped |

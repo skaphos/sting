@@ -22,9 +22,9 @@ var (
 	Date    = "unknown"
 )
 
-// resolved returns the running binary's identity. It is the single source both
-// `sting version` and `sting update` read, so the two can never disagree about
-// what is running.
+// resolved returns the running binary's identity, as `sting version` reports
+// it. sting does not update itself (ADR 0011), so this is the value a user
+// compares against the latest release to decide whether to upgrade.
 func resolved() buildinfo.Info {
 	return buildinfo.Resolve(Version, Commit, Date)
 }

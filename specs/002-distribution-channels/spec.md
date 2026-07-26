@@ -20,7 +20,8 @@ sting already conforms on four channels: GitHub release archives with checksums,
 SBOM, cosign bundle and build provenance; a Homebrew cask into `skaphos/homebrew-tools`; macOS
 Developer ID signing and notarization; and the in-binary MCP runtime installer established by
 [ADR 0003][adr0003]. Five required obligations are unmet, and each one is a user who cannot
-install, cannot upgrade, or cannot find the tool:
+install, cannot upgrade, or cannot find the tool. Four of the five are closed by this feature;
+the fifth is a recorded deviation:
 
 1. **Linux users have no package.** Every Linux install is "download a tarball, extract it, put
    it on `PATH` yourself." No `.deb`, no `.rpm`.
@@ -31,6 +32,9 @@ install, cannot upgrade, or cannot find the tool:
    information. A user cannot tell what they are running, and neither can a bug report.
 3. **There is no upgrade path the tool itself can offer.** Every upgrade runs through whichever
    channel the user originally installed from, and sting cannot tell them which one that was.
+   *(Deliberately left open — see Out of Scope and
+   [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md). Documented per channel in
+   `README.md` instead.)*
 4. **sting is invisible to MCP clients.** It is an MCP server with no entry in the index those
    clients read.
 5. **sting cannot be run as a container.** A `docker`-based MCP client configuration — the
@@ -79,6 +83,18 @@ its outcome must be *verified*, not assumed.
   exception to that rule, and a missing credential must fail the release rather than silently
   skipping a channel.
 
+### Session 2026-07-25 (post-implementation)
+
+- Q: Ship the self-update subcommand? → A: **No.** Dropped after implementation
+  measured the cost: verifying in-process (the only way to satisfy both "verification
+  cannot be skipped" and "no tooling required on the user's machine") took the binary
+  from 11 MB to 25 MB and `go.mod` from 44 to 106 requirements. This reverses the
+  answers to the two clarifications below about signature verification and the Windows
+  gate — both described how self-update would work, and neither now applies. Recorded
+  as a deviation from a required channel in
+  [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md), as DECISIONS/0001
+  demands. User Story 2 is specified but **not shipped**.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Know which version you are running, however you installed it (Priority: P1)
@@ -117,6 +133,13 @@ values are what appear.
 ---
 
 ### User Story 2 - Upgrade in place, or be told exactly how to (Priority: P2)
+
+> **NOT SHIPPED.** This story was specified, implemented, and then dropped on cost
+> grounds — see [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md). The
+> requirements below (FR-006 – FR-020) and the criteria SC-003 – SC-006 and
+> SC-011 – SC-014 are retained as the record of what was specified, and are **not**
+> implemented. The user-facing gap is closed by a per-channel upgrade table in
+> `README.md`. What sting does instead is in the Out of Scope section.
 
 A developer running an out-of-date sting asks it to update. If the running binary is one the
 developer installed by hand, sting verifies the new release was published by the project and is
@@ -336,7 +359,9 @@ succeeds with a credential passed through the environment.
 - **FR-005**: The resolved version MUST be available to the rest of the tool as a single value,
   so the update path and the version command can never disagree.
 
-**Self-update**
+**Self-update** — *specified, not shipped; see
+[ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md). Retained as the record of
+what a conforming implementation would require.*
 
 - **FR-006**: sting MUST provide an update command that upgrades the running binary to a
   published release. Self-replacement MUST remain disabled on Windows until Windows release
@@ -560,6 +585,13 @@ succeeds with a credential passed through the environment.
 
 ## Out of Scope
 
+- **A `sting update` self-update subcommand.** Required for Shape 2 by
+  DECISIONS/0001 and therefore a recorded deviation, not a silent omission:
+  [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md) documents why. Briefly:
+  verification cannot be skipped, verifying in-process is the only way to avoid
+  requiring `cosign` on the user's machine, and the dependency that makes that possible
+  more than doubles the binary for every user to serve one command. Upgrades run through
+  the channel the user installed from, documented per channel in `README.md`.
 - Hosted, signed apt or yum repositories. ADR-0001 excludes them explicitly; they would need
   their own decision record.
 - AUR packaging and a Nix flake. Optional under ADR-0001 and not expected.

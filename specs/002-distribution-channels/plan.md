@@ -4,6 +4,16 @@
 
 **Input**: Feature specification from `/specs/002-distribution-channels/spec.md`
 
+> **Status update — self-update was dropped after implementation.** This plan was written
+> before `sting update` was built and measured. It was built, it worked, and it was then
+> removed: verifying in-process cost +122% binary size and 62 extra modules to serve one
+> command. See [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md).
+>
+> The plan below is kept as the record of what was planned and why. Everything it says about
+> `internal/selfupdate`, `sting update`, and the `sigstore-go` dependency describes work that
+> was done and then reverted — those files do not exist, and `go.mod` is byte-identical to
+> `main`. The other four obligations shipped as planned.
+
 ## Summary
 
 Adopt `skaphos-resources` DECISIONS/0001 for sting, which is both a Shape 2 CLI and a Shape 3 MCP
@@ -28,9 +38,10 @@ ADR-0001 and repokeeper ADR-0007 both document.
 
 **Language/Version**: Go 1.26.5 (per `go.mod`)
 
-**Primary Dependencies**: existing — Cobra, viper, `modelcontextprotocol/go-sdk` v1.6.1,
-`google/go-github/v84`. New — `github.com/sigstore/sigstore-go` for in-process bundle
-verification (the feature's one significant dependency; justified in Complexity Tracking).
+**Primary Dependencies**: existing only — Cobra, viper, `modelcontextprotocol/go-sdk` v1.6.1,
+`google/go-github/v84`. **No dependency is added**: `go.mod` and `go.sum` are byte-identical to
+`main`. `sigstore-go` was added for in-process signature verification and then removed with the
+self-update command it existed to serve (ADR 0011).
 
 **Storage**: N/A. The update command writes only sting's own binary; no persisted state is added.
 
@@ -101,17 +112,10 @@ internal/
 ├── buildinfo/                 # NEW — version identity resolution (FR-001..FR-005)
 │   ├── buildinfo.go           #   ldflags > debug.ReadBuildInfo > unknown
 │   └── buildinfo_test.go
-├── selfupdate/                # NEW — the update command's engine (FR-006..FR-020)
-│   ├── release.go             #   resolve tag, list assets, download
-│   ├── verify.go              #   sigstore-go bundle verify + pinned identity + checksum
-│   ├── ownership.go           #   Homebrew / rpm / dpkg / Go toolchain / unmanaged
-│   ├── replace.go             #   atomic replace; platform-gated variants
-│   └── *_test.go
 └── cli/
-    ├── update.go              # NEW — thin Cobra command over internal/selfupdate
-    ├── update_test.go
-    ├── version.go             # CHANGED — resolve through internal/buildinfo
-    └── root.go                # CHANGED — register updateCmd
+    └── version.go             # CHANGED — resolve through internal/buildinfo
+
+# Planned and then reverted (ADR 0011): internal/selfupdate/*, internal/cli/update.go
 
 server.json                    # NEW — MCP registry entry, io.skaphos/sting
 Dockerfile                     # NEW — copies the GoReleaser-built binary; non-root; stdio
@@ -123,7 +127,7 @@ Dockerfile                     # NEW — copies the GoReleaser-built binary; non
 │                              #           unusable Homebrew credential (FR-038)
 └── ci.yml                     # CHANGED — validate server.json against its schema (FR-027)
 
-docs/adr/0011-self-update-trust-model.md   # NEW
+docs/adr/0011-no-self-update-subcommand.md # NEW — deviation record
 README.md                                   # CHANGED — install + upgrade paths per channel
 ```
 
@@ -164,8 +168,8 @@ Complete. Artifacts:
 The spec's story priorities and the issue's own suggested order agree, and the dependency edge is
 real: self-update cannot work until the binary knows its version.
 
-1. **US1 — version identity** (`internal/buildinfo`, `internal/cli/version.go`). Unblocks US2.
-2. **US2 — `sting update`** (`internal/selfupdate`, `internal/cli/update.go`, ADR 0011).
+1. **US1 — version identity** (`internal/buildinfo`, `internal/cli/version.go`). *Shipped.*
+2. **US2 — `sting update`** — *built, measured, and dropped; see ADR 0011.*
 3. **US3 — Linux packages** (`nfpms`, SBOM coverage, README). Independent of 1 and 2.
 4. **US4 — MCP registry** (`server.json`, CI schema validation, `mcp-publisher` in release).
 5. **US5 — container image** (`Dockerfile`, `dockers_v2`, buildx wiring).
@@ -191,8 +195,8 @@ Re-evaluated after the design above. **No gate changes status.** Two points wort
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| New dependency `github.com/sigstore/sigstore-go` (constitution: "external dependencies are minimized and justified") | FR-012 makes verification unskippable and FR-009 forbids requiring tooling on the user's machine. Verifying the Sigstore bundle the release already publishes therefore has to happen in-process. | Shelling out to `cosign` (clarification Q3, rejected: turns a missing binary into "cannot update" for nearly every end user). Importing `cosign/v2` (rejected: pulls an entire command surface for one call). Dropping verification (rejected: ADR-0001 states a self-updater that ignores available signing material is strictly worse than none). |
-| Two new `internal/` packages rather than extending `internal/cli` | Holds new logic to the 80% coverage default instead of `internal/cli`'s documented 60% floor, and keeps Principle V's inward-only layering intact. | Adding to `internal/cli` (rejected: inherits the lower floor and entangles domain logic with the Cobra shell). |
+| Dropping a **required** channel: no `sting update` subcommand | Verification cannot be skipped, and verifying in-process (the only way not to require `cosign` on the user's machine) cost +122% binary size and 62 extra modules to serve one command. | Shipping it anyway (rejected on cost). Shelling out to `cosign` (rejected: unusable for nearly every end user). Skipping verification (rejected: DECISIONS/0001 says that is strictly worse than shipping nothing). **Recorded as a deviation in [ADR 0011](../../docs/adr/0011-no-self-update-subcommand.md), which DECISIONS/0001 requires for a dropped required channel.** |
+| One new `internal/` package rather than extending `internal/cli` | Holds `buildinfo` to the 80% coverage default instead of `internal/cli`'s documented 60% floor, and keeps Principle V's inward-only layering intact. | Adding to `internal/cli` (rejected: inherits the lower floor and entangles domain logic with the Cobra shell). |
 
 ## Deferred, and why
 
