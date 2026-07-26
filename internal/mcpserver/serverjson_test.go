@@ -23,19 +23,22 @@ type serverJSON struct {
 		URL    string `json:"url"`
 		Source string `json:"source"`
 	} `json:"repository"`
-	Packages []struct {
-		RegistryType string `json:"registryType"`
-		Identifier   string `json:"identifier"`
-		Version      string `json:"version"`
-		Transport    struct {
-			Type string `json:"type"`
-		} `json:"transport"`
-		EnvironmentVariables []struct {
-			Name       string `json:"name"`
-			IsRequired bool   `json:"isRequired"`
-			IsSecret   bool   `json:"isSecret"`
-		} `json:"environmentVariables"`
-	} `json:"packages"`
+	Packages []serverPackage `json:"packages"`
+}
+
+// serverPackage is one installable form of the server in the registry entry.
+type serverPackage struct {
+	RegistryType string `json:"registryType"`
+	Identifier   string `json:"identifier"`
+	Version      string `json:"version"`
+	Transport    struct {
+		Type string `json:"type"`
+	} `json:"transport"`
+	EnvironmentVariables []struct {
+		Name       string `json:"name"`
+		IsRequired bool   `json:"isRequired"`
+		IsSecret   bool   `json:"isSecret"`
+	} `json:"environmentVariables"`
 }
 
 func loadServerJSON(t *testing.T) serverJSON {
@@ -51,6 +54,18 @@ func loadServerJSON(t *testing.T) serverJSON {
 		t.Fatalf("parsing %s: %v", path, err)
 	}
 	return s
+}
+
+// packageEntry returns the single package entry, failing cleanly if it is
+// absent. These tests exist to catch a malformed server.json, so indexing it
+// unguarded would panic the test binary on exactly the input they are meant to
+// report on.
+func packageEntry(t *testing.T, s serverJSON) serverPackage {
+	t.Helper()
+	if len(s.Packages) == 0 {
+		t.Fatal("server.json declares no package entries; MCP clients would have nothing to run")
+	}
+	return s.Packages[0]
 }
 
 // TestServerJSONIdentity pins the registry identity. The namespace is not
@@ -112,7 +127,7 @@ func TestServerJSONTransportMatchesServer(t *testing.T) {
 // credential model to every client that reads the registry.
 func TestServerJSONAdvertisesOwnCredentials(t *testing.T) {
 	s := loadServerJSON(t)
-	pkg := s.Packages[0]
+	pkg := packageEntry(t, s)
 
 	got := make(map[string]bool)
 	for _, env := range pkg.EnvironmentVariables {
@@ -144,9 +159,10 @@ func TestServerJSONAdvertisesOwnCredentials(t *testing.T) {
 func TestServerJSONVersionsAreConsistent(t *testing.T) {
 	s := loadServerJSON(t)
 
-	if s.Version != s.Packages[0].Version {
+	pkg := packageEntry(t, s)
+	if s.Version != pkg.Version {
 		t.Errorf("server version %q and package version %q disagree; the release stamps both",
-			s.Version, s.Packages[0].Version)
+			s.Version, pkg.Version)
 	}
 }
 
