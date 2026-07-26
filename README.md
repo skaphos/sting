@@ -26,17 +26,61 @@ brew tap skaphos/tools https://github.com/skaphos/homebrew-tools
 brew install --cask skaphos/tools/sting
 ```
 
+### Linux packages
+
+`.deb` and `.rpm` packages for x86-64 and arm64 are attached to every
+[release](https://github.com/skaphos/sting/releases):
+
+```sh
+sudo dpkg -i sting_<version>_amd64.deb     # Debian, Ubuntu
+sudo rpm -i sting-<version>-1.x86_64.rpm   # Fedora, RHEL, openSUSE
+```
+
+**There is no hosted apt or yum repository.** Shipping a `.deb` is not the same
+as running a package repository, and sting does not run one — hosting signed
+repositories is a materially larger commitment
+([DECISIONS/0001](https://github.com/skaphos/skaphos-resources/blob/main/DECISIONS/0001-distribution-channels-by-artifact-shape.md)
+puts it out of scope). Upgrading means downloading the next release's package.
+
 Or install from source:
 
 ```sh
 go install github.com/skaphos/sting/cmd/sting@latest
 ```
 
+`sting version` reports the installed module version for this path — the binary reads the version
+the Go toolchain records, so it is not limited to release builds.
+
 Or build from this repo:
 
 ```sh
 go -C tools tool task build      # -> ./sting
 ```
+
+A local build reports a pseudo-version and the revision it was built from, marked `(modified)` when
+the working tree is dirty. A build made with `-buildvcs=false` records nothing, and `sting version`
+says so rather than inventing a value.
+
+## Upgrading
+
+sting does not update itself. Upgrade through the channel you installed from:
+
+| Installed with | Upgrade with |
+| --- | --- |
+| Homebrew | `brew upgrade --cask sting` |
+| `.rpm` | download the next release's `.rpm`, then `sudo rpm -U` |
+| `.deb` | download the next release's `.deb`, then `sudo dpkg -i` |
+| `go install` | `go install github.com/skaphos/sting/cmd/sting@latest` |
+| container image | `docker pull ghcr.io/skaphos/sting:latest` |
+| downloaded archive | download the next release's archive |
+
+`sting version` reports what you are running, so you can tell whether an upgrade
+is needed. Nothing in sting checks for updates in the background.
+
+There is deliberately no `sting update` subcommand: verifying a release properly
+in-process would more than double the binary for every user, and shipping a
+self-updater that skips verification would be worse than shipping none. See
+[ADR 0011](docs/adr/0011-no-self-update-subcommand.md).
 
 ## Getting started
 
@@ -130,6 +174,32 @@ sting install --manual             # print snippets instead of writing
 sting install list                 # show registration state per runtime
 sting uninstall                    # remove entries (prompts unless --yes)
 ```
+
+### Running the server from a container
+
+If you would rather not install sting locally, MCP clients that support a
+`docker` command can run the published image instead. It needs no Go toolchain
+and works on x86-64 and arm64:
+
+```json
+{
+  "mcpServers": {
+    "sting": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i",
+               "-e", "STING_TOKEN",
+               "ghcr.io/skaphos/sting:latest"],
+      "env": { "STING_TOKEN": "ghp_xxx" }
+    }
+  }
+}
+```
+
+The image runs as a non-root user, contains no credentials, and starts the MCP
+server over stdio with no arguments. Credentials come from the environment,
+using the same `STING_` names as the local binary.
+
+### Registering the local binary
 
 `install` writes a `sting mcp` entry pointing at the current executable. Because
 `get_commits` is **read-only** (advertised via the MCP `readOnlyHint`

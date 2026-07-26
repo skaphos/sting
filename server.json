@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.skaphos/sting",
+  "description": "Read-only commit and repository-activity queries over a time window, for GitHub and GitLab.",
+  "repository": {
+    "url": "https://github.com/skaphos/sting",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/skaphos/sting",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "STING_TOKEN",
+          "description": "GitHub personal access token with read-only repository scope. sting uses its own token rather than reading GITHUB_TOKEN.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "STING_GITLAB_TOKEN",
+          "description": "GitLab personal access token with read-only scope. sting uses its own token rather than reading GITLAB_TOKEN.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

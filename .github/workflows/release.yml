@@ -9,6 +9,8 @@ permissions:
   contents: write
   attestations: write
   id-token: write
+  # Required to push the multi-arch image to GHCR.
+  packages: write
 
 jobs:
   release:
@@ -25,6 +27,20 @@ jobs:
         uses: anchore/sbom-action/download-syft@v0
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
+      # The container image is built inside the same GoReleaser invocation as
+      # the archives and packages (dockers_v2), so it fails as a unit with them
+      # rather than becoming a second channel that can half-land. These three
+      # steps are its prerequisites; a failure in any of them fails the release.
+      - name: Set up QEMU for cross-architecture builds
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Mint Homebrew app token
         id: app-token
         uses: actions/create-github-app-token@v3
@@ -34,31 +50,41 @@ jobs:
           owner: skaphos
           repositories: homebrew-tools
           skip-token-revoke: false
-      - name: Determine GoReleaser args
-        id: goreleaser_args
+      # A missing or unusable credential fails the release rather than silently
+      # dropping the channel it belongs to.
+      #
+      # This step previously appended --skip=homebrew and continued with only a
+      # ::warning::, which meant a release could complete green with the cask
+      # unpublished. That is exactly the failure repokeeper ADR-0007 records --
+      # its cask sat pinned at 0.6.0 across two releases -- and the reason
+      # DECISIONS/0001 flags silent staleness as the cost of adding channels.
+      # A release that cannot publish every required channel is a failed
+      # release, not a partial success.
+      - name: Verify the Homebrew tap credential
         shell: bash
         env:
           HOMEBREW_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          set -euo pipefail
+
           if [ -z "${HOMEBREW_TOKEN}" ]; then
-            echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
-            echo "::warning::GitHub App token was not minted; skipping Homebrew formula publish."
-            exit 0
+            echo "::error title=Homebrew::The release bot token was not minted, so the cask cannot be published. Check RELEASE_BOT_CLIENT_ID and RELEASE_BOT_PRIVATE_KEY."
+            exit 1
           fi
 
-          if curl --silent --show-error --fail \
+          if ! curl --silent --show-error --fail \
             --header "Authorization: Bearer ${HOMEBREW_TOKEN}" \
             --header "Accept: application/vnd.github+json" \
             https://api.github.com/repos/skaphos/homebrew-tools >/dev/null; then
-            echo "args=release --clean" >> "$GITHUB_OUTPUT"
-          else
-            echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
-            echo "::warning::GitHub App token cannot access skaphos/homebrew-tools; skipping Homebrew formula publish."
+            echo "::error title=Homebrew::The release bot token cannot reach skaphos/homebrew-tools, so the cask cannot be published. Check the GitHub App installation and its repository access."
+            exit 1
           fi
+
+          echo "Homebrew tap credential verified."
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: v2.17.0
-          args: ${{ steps.goreleaser_args.outputs.args }}
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -80,3 +106,218 @@ jobs:
             dist/checksums.txt
             dist/*.sbom.json
             dist/*.sigstore.json
+
+      # Publish the MCP registry entry. This is the one channel that does not
+      # fail the release as a unit: DECISIONS/0001 records the registry as the
+      # least settled channel, where a break is a smaller emergency than a broken
+      # cask, and it is still in preview upstream. It is therefore
+      # continue-on-error -- but loudly, never silently, and the post-release
+      # verification job reports whether the entry actually landed.
+      - name: Stamp the release version into server.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          tmp="$(mktemp)"
+          jq --arg v "$version" \
+            '.version = $v | .packages[].version = $v' server.json > "$tmp"
+          mv "$tmp" server.json
+          echo "server.json stamped to ${version}"
+
+      - name: Install mcp-publisher
+        id: mcp_publisher_install
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Pinned deliberately: @latest would make releases non-reproducible
+          # and could break a release when upstream changes. Bump on purpose.
+          go install github.com/modelcontextprotocol/registry/cmd/mcp-publisher@v1.8.0
+
+      - name: Publish to the MCP registry
+        id: mcp_publish
+        continue-on-error: true
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MCP_REGISTRY_KEY}" ]; then
+            echo "::warning title=MCP registry::MCP_REGISTRY_KEY is not set; skipping registry publish."
+            exit 1
+          fi
+          mcp-publisher login dns --domain skaphos.io --private-key "${MCP_REGISTRY_KEY}"
+          mcp-publisher publish
+
+      - name: Report MCP registry outcome
+        if: always()
+        env:
+          PUBLISH_OUTCOME: ${{ steps.mcp_publish.outcome }}
+        run: |
+          if [ "${PUBLISH_OUTCOME}" != "success" ]; then
+            echo "::warning title=MCP registry::Publishing io.skaphos/sting failed. The rest of the release is valid and complete; re-run this step to retry without cutting a new release. Check the skaphos.io TXT record (v=MCPv1; k=ed25519) and the MCP_REGISTRY_KEY secret."
+          else
+            echo "MCP registry entry published for ${GITHUB_REF_NAME}."
+          fi
+
+  # Confirms each channel actually served the new version, by querying the
+  # channel rather than trusting the publishing step's own report.
+  #
+  # The failure this exists to catch is not "the release job errored" -- that is
+  # already visible. It is the release that completes green while a channel
+  # quietly did not move, which is how repokeeper's cask sat at 0.6.0 across two
+  # releases. Reachability is not the test: a cask still pinned to the previous
+  # version responds perfectly well. The version it serves is the test.
+  verify:
+    name: Verify Published Channels
+    runs-on: ubuntu-latest
+    needs: release
+    if: always() && needs.release.result == 'success'
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify release assets
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name')"
+          echo "Published assets:"; echo "$assets" | sed 's/^/  /'
+
+          missing=0
+          require() {
+            if ! echo "$assets" | grep -Fxq "$1"; then
+              echo "::error title=Release assets::Missing $1"
+              missing=1
+            fi
+          }
+
+          # GoReleaser strips the leading "v": tag v1.2.0 produces
+          # sting_1.2.0_linux_amd64.tar.gz, not sting_v1.2.0_....
+          for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            require "sting_${version}_${os_arch}.tar.gz"
+          done
+          for arch in amd64 arm64; do
+            require "sting_${version}_windows_${arch}.zip"
+            require "sting_${version}_${arch}.deb"
+          done
+          # RPM uses its own conventional naming and architecture spelling.
+          require "sting-${version}-1.x86_64.rpm"
+          require "sting-${version}-1.aarch64.rpm"
+          require "checksums.txt"
+          require "checksums.txt.sigstore.json"
+
+          # SBOMs are published per artifact, for archives *and* packages.
+          # Without this the release could verify while SBOM generation had
+          # silently regressed -- the packages entry in the sboms block is new
+          # and is exactly the kind of thing that breaks unnoticed.
+          for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            require "sting_${version}_${os_arch}.tar.gz.sbom.json"
+          done
+          for arch in amd64 arm64; do
+            require "sting_${version}_windows_${arch}.zip.sbom.json"
+            require "sting_${version}_${arch}.deb.sbom.json"
+          done
+          require "sting-${version}-1.x86_64.rpm.sbom.json"
+          require "sting-${version}-1.aarch64.rpm.sbom.json"
+
+          if [ "$missing" -ne 0 ]; then
+            echo "::error title=Release assets::The release is missing artifacts it should have published."
+            exit 1
+          fi
+          echo "All expected release assets are present."
+
+      # Retry before declaring a channel missing: tap pushes and registry
+      # propagation are not instantaneous, and a third-party delay is not a
+      # failed release.
+      - name: Verify the Homebrew cask serves this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          url="https://raw.githubusercontent.com/skaphos/homebrew-tools/main/Casks/sting.rb"
+
+          for attempt in 1 2 3 4 5; do
+            cask="$(curl --silent --fail "$url" || true)"
+            if echo "$cask" | grep -q "version \"${version}\""; then
+              echo "Cask serves ${version}."
+              exit 0
+            fi
+            echo "Attempt ${attempt}: cask does not yet serve ${version}; retrying."
+            sleep $((attempt * 15))
+          done
+
+          echo "::error title=Homebrew::The cask in skaphos/homebrew-tools is not serving ${version}. It responded, but with a stale version -- this is the silent-staleness failure, not an outage."
+          exit 1
+
+      - name: Verify the container image manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          image="ghcr.io/skaphos/sting:${version}"
+
+          for attempt in 1 2 3 4 5; do
+            if manifest="$(docker buildx imagetools inspect "$image" --raw 2>/dev/null)"; then
+              break
+            fi
+            echo "Attempt ${attempt}: ${image} not resolvable yet; retrying."
+            sleep $((attempt * 15))
+            manifest=""
+          done
+
+          if [ -z "${manifest:-}" ]; then
+            echo "::error title=Container image::${image} is not resolvable."
+            exit 1
+          fi
+
+          for platform in amd64 arm64; do
+            if ! echo "$manifest" | jq -e --arg a "$platform" \
+              '.manifests[]?.platform | select(.os == "linux" and .architecture == $a)' >/dev/null; then
+              echo "::error title=Container image::${image} has no linux/${platform} entry in its manifest."
+              exit 1
+            fi
+          done
+          echo "${image} publishes linux/amd64 and linux/arm64."
+
+      # Reported, never blocking: the registry is the one channel exempt from
+      # failing the release as a unit.
+      - name: Verify the MCP registry entry
+        continue-on-error: true
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          api="https://registry.modelcontextprotocol.io/v0/servers?search=io.skaphos/sting"
+
+          for attempt in 1 2 3; do
+            body="$(curl --silent --fail "$api" || true)"
+            if echo "$body" | jq -e --arg v "$version" \
+              '.servers[]? | select(.name == "io.skaphos/sting" and .version == $v)' >/dev/null 2>&1; then
+              echo "Registry serves io.skaphos/sting ${version}."
+              exit 0
+            fi
+            sleep $((attempt * 20))
+          done
+
+          echo "::warning title=MCP registry::io.skaphos/sting is not serving ${version}. The rest of the release is valid; the publish step can be re-run without cutting a new release."
+          exit 1
+
+      - name: Channel summary
+        if: always()
+        run: |
+          {
+            echo "## Published channels"
+            echo
+            echo "Verified by querying each channel for the version it serves."
+            echo "The MCP registry is reported but non-blocking."
+          } >> "$GITHUB_STEP_SUMMARY"

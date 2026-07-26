@@ -71,6 +71,26 @@ Tasks run without globally installing tools (Task is pinned in `tools/`):
 - `go -C tools tool task build-ci`: goreleaser snapshot build for all platforms.
 - `go -C tools tool task ci`: run the full local CI sequence.
 
+### Release and compliance tooling
+
+Pinned in `.tool-versions` and installed with `mise install`. Without them the
+release path behaves differently locally than in CI, which hides real breakage:
+a missing `syft` makes the SBOM step fail locally while passing in CI.
+
+- `syft`, `cosign`: GoReleaser shells out to these for SBOMs and signing.
+- `reuse`: REUSE compliance lint, the same check CI runs.
+- `check-jsonschema`: validates `server.json` against the MCP registry schema.
+
+Useful release checks that do not publish anything:
+
+- `goreleaser check`: validate `.goreleaser.yaml`.
+- `goreleaser release --snapshot --clean`: build every artifact — archives,
+  `.deb`/`.rpm`, SBOMs, and per-platform container images — without pushing.
+
+**Note on lint:** golangci-lint caches results by path. If it reports issues in
+files that do not exist (for example from a deleted worktree), clear the cache
+before believing it.
+
 ## Coding Style & Naming Conventions
 
 - Go version: see `go.mod` (`go 1.26.5`).
