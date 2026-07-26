@@ -75,7 +75,7 @@ This is a deviation from a required channel, taken knowingly:
 | Installed with | Upgrade with |
 | --- | --- |
 | Homebrew | `brew upgrade --cask sting` |
-| `.rpm` | `sudo dnf upgrade sting` |
+| `.rpm` | download the next release's `.rpm`, then `sudo rpm -U` |
 | `.deb` | download the next release's `.deb`, then `sudo dpkg -i` |
 | `go install` | `go install github.com/skaphos/sting/cmd/sting@latest` |
 | container image | `docker pull ghcr.io/skaphos/sting:latest` |

@@ -130,7 +130,9 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          go install github.com/modelcontextprotocol/registry/cmd/mcp-publisher@latest
+          # Pinned deliberately: @latest would make releases non-reproducible
+          # and could break a release when upstream changes. Bump on purpose.
+          go install github.com/modelcontextprotocol/registry/cmd/mcp-publisher@v1.8.0
 
       - name: Publish to the MCP registry
         id: mcp_publish

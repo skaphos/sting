@@ -33,7 +33,7 @@ brew install --cask skaphos/tools/sting
 
 ```sh
 sudo dpkg -i sting_<version>_amd64.deb     # Debian, Ubuntu
-sudo rpm -i sting-<version>.x86_64.rpm     # Fedora, RHEL, openSUSE
+sudo rpm -i sting-<version>-1.x86_64.rpm   # Fedora, RHEL, openSUSE
 ```
 
 **There is no hosted apt or yum repository.** Shipping a `.deb` is not the same
@@ -68,7 +68,7 @@ sting does not update itself. Upgrade through the channel you installed from:
 | Installed with | Upgrade with |
 | --- | --- |
 | Homebrew | `brew upgrade --cask sting` |
-| `.rpm` | `sudo dnf upgrade sting` |
+| `.rpm` | download the next release's `.rpm`, then `sudo rpm -U` |
 | `.deb` | download the next release's `.deb`, then `sudo dpkg -i` |
 | `go install` | `go install github.com/skaphos/sting/cmd/sting@latest` |
 | container image | `docker pull ghcr.io/skaphos/sting:latest` |
