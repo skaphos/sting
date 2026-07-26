@@ -213,6 +213,20 @@ jobs:
           require "checksums.txt"
           require "checksums.txt.sigstore.json"
 
+          # SBOMs are published per artifact, for archives *and* packages.
+          # Without this the release could verify while SBOM generation had
+          # silently regressed -- the packages entry in the sboms block is new
+          # and is exactly the kind of thing that breaks unnoticed.
+          for os_arch in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            require "sting_${version}_${os_arch}.tar.gz.sbom.json"
+          done
+          for arch in amd64 arm64; do
+            require "sting_${version}_windows_${arch}.zip.sbom.json"
+            require "sting_${version}_${arch}.deb.sbom.json"
+          done
+          require "sting-${version}-1.x86_64.rpm.sbom.json"
+          require "sting-${version}-1.aarch64.rpm.sbom.json"
+
           if [ "$missing" -ne 0 ]; then
             echo "::error title=Release assets::The release is missing artifacts it should have published."
             exit 1
