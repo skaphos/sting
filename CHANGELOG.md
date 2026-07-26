@@ -4,6 +4,41 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/skaphos/sting/compare/v1.0.0...v1.1.0) (2026-07-26)
+
+
+### Features
+
+* **activity:** repository activity digest, cost-bounded by construction ([#119](https://github.com/skaphos/sting/issues/119)) ([2c21d8e](https://github.com/skaphos/sting/commit/2c21d8e987aced803380a041a9bbe5f720eff82e))
+* add commit file and diff evidence ([#12](https://github.com/skaphos/sting/issues/12)) ([1c8369b](https://github.com/skaphos/sting/commit/1c8369b4dda6d6cd05792e23050fc2a94b1d5639))
+* add commit-query core ([1674079](https://github.com/skaphos/sting/commit/16740799d7bc457135a660ca9b63a9831757438a))
+* add explicit "query" subcommand ([#16](https://github.com/skaphos/sting/issues/16)) ([3d1bc3e](https://github.com/skaphos/sting/commit/3d1bc3e4494c4cb00f4e50dfb042173e818b475f))
+* add GitLab commit provider ([#6](https://github.com/skaphos/sting/issues/6)) ([8e9823a](https://github.com/skaphos/sting/commit/8e9823a568ccb5f07f6881bbf5509d8691a41ac4))
+* add MCP server with read-only get_commits tool ([37c3616](https://github.com/skaphos/sting/commit/37c361625c7cc892468aed683a981511f326edff))
+* add multi-runtime MCP installer ([48d09bf](https://github.com/skaphos/sting/commit/48d09bfb45fa8fe678f93a79329335b324a29ff7))
+* add OAuth App authentication for GitHub and GitLab (SKA-466) ([#13](https://github.com/skaphos/sting/issues/13)) ([7d39af3](https://github.com/skaphos/sting/commit/7d39af385f8937178319c668bf970c222dec9238))
+* **cli:** verbose `auth login <provider>` + accept ADR 0008 ([#44](https://github.com/skaphos/sting/issues/44)) ([95482ba](https://github.com/skaphos/sting/commit/95482ba487d5324cb9d50ad64884fdac0641f91e))
+* **dist:** conform to DECISIONS/0001 distribution channels ([#122](https://github.com/skaphos/sting/issues/122)) ([cfb6dad](https://github.com/skaphos/sting/commit/cfb6dad699670416096be64cacec8ccbcf3721fe))
+* make organization search functional + dependency refresh (SKA-475, SKA-503) ([#20](https://github.com/skaphos/sting/issues/20)) ([a144a7e](https://github.com/skaphos/sting/commit/a144a7e10732f6b76a5d9cc6baa4eb24b486d082))
+* wire cobra CLI with viper config and the sting binary ([14e4f8b](https://github.com/skaphos/sting/commit/14e4f8b6e2eacc7565c1497a245ad93ecfcde2a8))
+
+
+### Bug Fixes
+
+* **cli,server,config:** stop token leak, add MCP panic recovery, harden config ([#33](https://github.com/skaphos/sting/issues/33)) ([438d1d6](https://github.com/skaphos/sting/commit/438d1d6b377094224acfe3cf16638bf2d9e60a65))
+* **clients:** prevent query injection, rate-limit masking, and window drift ([#34](https://github.com/skaphos/sting/issues/34)) ([70a1035](https://github.com/skaphos/sting/commit/70a10354ed760adbdbc31de636ae3d52695f4dc2))
+* **credentials:** honor isolation contract and stop losing credentials ([#32](https://github.com/skaphos/sting/issues/32)) ([71c7c9a](https://github.com/skaphos/sting/commit/71c7c9a6e572825f78889fc09ea2407a3d6639b4))
+* **deps:** bump Go to 1.26.5 and refresh modules, tools, and CI actions ([#29](https://github.com/skaphos/sting/issues/29)) ([b484575](https://github.com/skaphos/sting/commit/b484575c1a016ea4af0917914f20cd448f48e64a))
+* **mcpinstall:** stop destroying user config on install/uninstall ([#35](https://github.com/skaphos/sting/issues/35)) ([4ae52a5](https://github.com/skaphos/sting/commit/4ae52a5eb5139a76b00a7d626a146d40a92a6177))
+* repair inert golangci-lint v2 config, dead coverage-skip branch, stale docs ([#31](https://github.com/skaphos/sting/issues/31)) ([5aa14a0](https://github.com/skaphos/sting/commit/5aa14a044893af7d9fd8abf7bedd3f27949aa94c))
+* skip unreadable repos in org scope instead of aborting the scan ([#23](https://github.com/skaphos/sting/issues/23)) ([e2d1654](https://github.com/skaphos/sting/commit/e2d165436f0354baa8e65fda97532e7344e2dd33))
+
+
+### Performance Improvements
+
+* **clients:** bound routine queries by default ([#37](https://github.com/skaphos/sting/issues/37)) ([4affd0b](https://github.com/skaphos/sting/commit/4affd0b18300d0edce413c332719198024232669))
+* **clients:** fetch per-commit detail concurrently ([#36](https://github.com/skaphos/sting/issues/36)) ([f392a6a](https://github.com/skaphos/sting/commit/f392a6a087d593999e6f82fdbf0a78797c4da7ee))
+
 ## [0.0.7](https://github.com/skaphos/sting/compare/v0.0.6...v0.0.7) (2026-07-12)
 
 
