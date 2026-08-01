@@ -32,7 +32,7 @@ jobs:
       # rather than becoming a second channel that can half-land. These three
       # steps are its prerequisites; a failure in any of them fails the release.
       - name: Set up QEMU for cross-architecture builds
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
