@@ -93,7 +93,7 @@ before believing it.
 
 ## Coding Style & Naming Conventions
 
-- Go version: see `go.mod` (`go 1.26.5`).
+- Go version: see `go.mod` (`go 1.27.1`).
 - Formatting: `gofmt` and `goimports`, enforced via `golangci-lint`.
 - Naming: standard Go conventions (exported `PascalCase`, unexported `camelCase`).
 - Tests: filename suffix `_test.go`; keep fixtures under `testdata/`.

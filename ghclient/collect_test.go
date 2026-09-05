@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v91/github"
 	"github.com/skaphos/sting/model"
 )
 
@@ -20,6 +21,16 @@ func newTestClient(t *testing.T, serverURL string, perPage int) *Client {
 		t.Fatalf("New: %v", err)
 	}
 	return c
+}
+
+// ghWithTransport builds a bare go-github client over tr. Construction only
+// fails on a nil transport, which no caller passes.
+func ghWithTransport(tr http.RoundTripper) *github.Client {
+	gh, err := github.NewClient(github.WithTransport(tr))
+	if err != nil {
+		panic(err)
+	}
+	return gh
 }
 
 // searchResponse is one item's worth of a commit-search response.
