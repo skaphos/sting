@@ -1113,6 +1113,93 @@ func TestEnsureDefaultProviderGitLabSetsCompatibleScope(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultProviderUpdatesExplicitConfig(t *testing.T) {
+	home := isolateHome(t)
+	origV, origConfigFile := v, configFile
+	t.Cleanup(func() { v, configFile = origV, origConfigFile })
+	v = viper.New()
+	configFile = filepath.Join(t.TempDir(), "custom.yaml")
+	original := "provider: github\ndefault_window: 14d\n"
+	if err := os.WriteFile(configFile, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v.SetConfigFile(configFile)
+	if err := v.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	ensureDefaultProvider("gitlab")
+
+	raw, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, want := range []string{"provider: gitlab", "default_window: 14d", "default_scope: repos"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("explicit config missing %q:\n%s", want, content)
+		}
+	}
+	unexpected := filepath.Join(home, ".config", "sting", "config.yaml")
+	if _, err := os.Stat(unexpected); !os.IsNotExist(err) {
+		t.Errorf("init wrote unrelated default config %s: %v", unexpected, err)
+	}
+}
+
+func TestEnsureDefaultProviderUpdatesLoadedFallbackConfig(t *testing.T) {
+	home := isolateHome(t)
+	origV, origConfigFile := v, configFile
+	t.Cleanup(func() { v, configFile = origV, origConfigFile })
+	v = viper.New()
+	configFile = ""
+	loadedPath := filepath.Join(home, ".sting", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(loadedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(loadedPath, []byte("provider: github\ndefault_org: acme\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v.SetConfigFile(loadedPath)
+	if err := v.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	ensureDefaultProvider("gitlab")
+
+	raw, err := os.ReadFile(loadedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, want := range []string{"provider: gitlab", "default_org: acme", "default_scope: repos"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("loaded config missing %q:\n%s", want, content)
+		}
+	}
+	unexpected := filepath.Join(home, ".config", "sting", "config.yaml")
+	if _, err := os.Stat(unexpected); !os.IsNotExist(err) {
+		t.Errorf("init shadowed the loaded config with %s: %v", unexpected, err)
+	}
+}
+
+func TestEnsureDefaultProviderCreatesExplicitMissingConfig(t *testing.T) {
+	isolateHome(t)
+	origV, origConfigFile := v, configFile
+	t.Cleanup(func() { v, configFile = origV, origConfigFile })
+	v = viper.New()
+	configFile = filepath.Join(t.TempDir(), "nested", "custom.yaml")
+
+	ensureDefaultProvider("github")
+
+	raw, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatalf("explicit config was not created: %v", err)
+	}
+	if !strings.Contains(string(raw), "provider: github") {
+		t.Fatalf("explicit config missing provider:\n%s", raw)
+	}
+}
+
 // TestConfigMissingExplicitConfigFile covers the P2 finding: an explicit
 // --config PATH that does not exist must be surfaced, not silently treated
 // like ordinary auto-discovery "no config file found."

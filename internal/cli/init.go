@@ -221,8 +221,8 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 }
 
 // ensureDefaultProvider sets the provider in viper (for the rest of this
-// process) and persists it to ~/.config/sting/config.yaml (creating
-// directories and file as needed).
+// process) and persists it to the explicitly selected or loaded config file.
+// When no file was selected or loaded, it creates the default config path.
 //
 // It deliberately does NOT use viper's WriteConfig: WriteConfig serializes
 // viper's entire merged state (defaults + env + bound flags), which would
@@ -235,17 +235,15 @@ func runGitLabAuthWizard(cmd *cobra.Command, out io.Writer, in *bufio.Reader) er
 func ensureDefaultProvider(provider string) {
 	v.Set("provider", provider)
 
-	dirs := configSearchDirs()
-	if len(dirs) == 0 {
+	configPath := selectedConfigPath()
+	if configPath == "" {
 		return
 	}
-	dir := dirs[0]
+	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "sting: warning: could not create config directory %s: %v\n", dir, err)
 		return
 	}
-	configPath := filepath.Join(dir, "config.yaml")
-
 	keys := map[string]string{"provider": provider}
 	if provider == "gitlab" {
 		// GitLab doesn't support the built-in default_scope of "search" (see
@@ -265,6 +263,20 @@ func ensureDefaultProvider(provider string) {
 	}
 
 	v.SetConfigFile(configPath)
+}
+
+func selectedConfigPath() string {
+	if configFile != "" {
+		return configFile
+	}
+	if path := v.ConfigFileUsed(); path != "" {
+		return path
+	}
+	dirs := configSearchDirs()
+	if len(dirs) == 0 {
+		return ""
+	}
+	return filepath.Join(dirs[0], "config.yaml")
 }
 
 // setConfigKeys does a targeted read-modify-write of the given top-level
