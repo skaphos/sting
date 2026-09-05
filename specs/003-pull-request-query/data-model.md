@@ -113,7 +113,7 @@ no PRs could be returned. Per-entry completeness covers the retained entry only.
 `PRDisclosure`: `kind`, `reason`, optional `next_action`, optional `repo`, `number`, `stream`.
 Kinds include `visibility`, `time-basis`, `role`, `search-capped`, `search-incomplete`,
 `request-budget`, `result-limit`, `pagination-limit`, `repo-skipped`, `history-incomplete`,
-`history-ambiguous`, `reasons-incomplete`, `metadata-unavailable`, `provider-error`,
+`history-ambiguous`, `history-bounded`, `reasons-incomplete`, `metadata-unavailable`, `provider-error`,
 `identity-unresolved`, `provider-changed`. Stable sorting/deduplication preserves attribution.
 Errors are sanitized summaries; do not copy credential-bearing request URLs or response bodies.
 

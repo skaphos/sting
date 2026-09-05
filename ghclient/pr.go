@@ -22,6 +22,7 @@ type prSession struct {
 	closedIssues map[string]bool
 	client       *Client
 	missingMeta  map[string]int
+	beforeWindow int
 	counts       model.PRCostReport
 	coverage     model.PRCoverage
 	disclosures  []model.PRDisclosure
@@ -94,6 +95,7 @@ func prNextAction(kind string) string {
 	case "provider-changed":
 		return "Re-run the query; the provider state changed during collection."
 	}
+	// history-bounded and the selection kinds have no corrective action.
 	return ""
 }
 

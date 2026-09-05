@@ -49,6 +49,9 @@ func (c *Client) CollectPRs(ctx context.Context, q model.PRQuery) (model.PRResul
 		err = s.walkPRRepos(ctx, q.Scope, q.Repos, q.Org, func(repo string) error { _, e := s.listPRPages(ctx, repo, "all", process, stop); return e }, stop)
 	}
 	err = s.stop(err, "collect PR activity", "")
+	if s.beforeWindow > 0 {
+		s.note("history-bounded", fmt.Sprintf("Skipped lifecycle history for %d record(s) last updated before the window start; opening, merging, closing, and reopening each advance that timestamp.", s.beforeWindow), "", 0)
+	}
 	for _, entry := range entries {
 		result.PRs = append(result.PRs, entry)
 	}
@@ -266,6 +269,7 @@ func (s *prSession) activityPage(ctx context.Context, q model.PRQuery, page []mo
 		}
 		seen[id] = true
 		if prBeforeWindow(p, q) {
+			s.beforeWindow++
 			continue
 		}
 		match, known := prFilter(p, q)

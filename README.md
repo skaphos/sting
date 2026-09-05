@@ -467,8 +467,9 @@ Results carry an independent schema, qualifying action timestamps, current metad
 request costs, and separate discovery/evidence completeness. Defaults are 100 PRs and
 500 requests; explicit zero disables the selected cap. Lifecycle history uses extra
 budgeted requests per candidate whose record could still hold an in-window action; a PR last
-updated before the window is skipped without a request, because every opening, merge, closure,
-and reopening advances that timestamp. Optional PR details, diffs, and checks are not fetched.
+updated before the window is skipped without a request, because opening, merging, closing, and
+reopening each advance that timestamp. Runs that skip records this way say so, and how many,
+in a `history-bounded` disclosure. Optional PR details, diffs, and checks are not fetched.
 Every disclosure carries a `next_action` when a safe one exists, and unavailable optional
 metadata is summarized once per field set, with per-record detail in each `missing_fields`.
 Unrestricted search is public-only and subject to GitHub search coverage limits. Use

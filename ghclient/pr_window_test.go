@@ -75,6 +75,54 @@ func TestPRActivitySkipsHistoryForRecordsBeforeWindow(t *testing.T) {
 	if events != 1 || got.Cost.HistoryRequests != 1 || got.Cost.Consumed != 7 {
 		t.Fatalf("stale records cost lifecycle requests: events=%d cost=%+v", events, got.Cost)
 	}
+	// The bound rests on an inference about update timestamps, so the report
+	// states that it was applied and to how many records (research R2).
+	bounded := 0
+	for _, d := range got.Disclosures {
+		if d.Kind == "history-bounded" {
+			bounded++
+			if !strings.Contains(d.Reason, fmt.Sprintf("%d record(s)", total-1)) {
+				t.Errorf("history bound not quantified: %q", d.Reason)
+			}
+		}
+	}
+	if bounded != 1 {
+		t.Fatalf("history bound applied without disclosing it: %+v", got.Disclosures)
+	}
+}
+
+// A run that skips nothing must not claim a bound it never applied.
+func TestPRActivityOmitsHistoryBoundWhenNothingSkipped(t *testing.T) {
+	f := newPRFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls") {
+			p := prPayload(1)
+			p["created_at"] = "2026-08-24T13:00:00Z"
+			p["updated_at"] = "2026-08-24T13:00:00Z"
+			prJSON(t, w, []any{p})
+			return
+		}
+		prJSON(t, w, []any{})
+	})
+	c, err := New("", f.server.URL+"/", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := config.Default().ResolvePRs(config.PRRequest{Scope: "repos", Repos: []string{"acme/api"}}, prClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.CollectPRs(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got.Disclosures {
+		if d.Kind == "history-bounded" {
+			t.Fatalf("disclosed a bound that was never applied: %q", d.Reason)
+		}
+	}
+	if got.Count != 1 || got.Truncated {
+		t.Fatalf("in-window record lost: count=%d truncated=%v", got.Count, got.Truncated)
+	}
 }
 
 // A record updated after the window keeps its history read, because a closure

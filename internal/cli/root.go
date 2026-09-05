@@ -96,10 +96,13 @@ func initConfig() {
 	}
 
 	if err := v.ReadInConfig(); err != nil && !configMissing(err) {
-		// A missing config file is fine (sting works from defaults/env/flags); a
-		// real parse error is worth surfacing without aborting the command.
+		// A missing config file is fine (sting works from defaults/env/flags). A
+		// real parse error is recorded rather than aborting startup, because the
+		// commands disagree about how to treat it: query and activity continue
+		// from defaults, while the PR workflows and `sting mcp` refuse to run on
+		// defaults they cannot confirm. See loadConfig and loadPRConfig.
 		configReadErr = err
-		fmt.Fprintln(os.Stderr, "sting: warning: configuration could not be read; check file syntax and access")
+		fmt.Fprintln(os.Stderr, "sting: warning: configuration could not be read; check file syntax and access. query and activity continue from defaults; prs, inbox, and mcp fail until it is fixed")
 	}
 }
 

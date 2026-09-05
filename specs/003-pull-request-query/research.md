@@ -27,17 +27,36 @@ A generic provider-query framework or new public provider package adds no needed
 ## R2 — Discover historical candidates conservatively
 
 **Decision:** For `any` and `closed`, search PRs created no later than the window end, then
-read lifecycle history. Do not bound candidates by latest update/closure or require them to
-be currently closed. Repos/org use PR listing with `state=all`; apply exact filters locally.
+read lifecycle history. Do not bound *discovery* by latest update/closure or require candidates
+to be currently closed. Repos/org use PR listing with `state=all`; apply exact filters locally.
 Specific `created`, `updated`, and `merged` bases can use their matching discovery qualifiers.
 
-**Rationale:** Current-record date filters cannot establish an earlier closure erased by later
-reopening. The conservative superset is a design inference from the documented search fields,
-not a provider guarantee about every lifecycle event updating `updated_at`.
+**Revised during implementation:** history *reads* are bounded below by the window start. A
+candidate whose `updated_at` precedes `since` is dropped without a lifecycle request. Discovery
+is unchanged, so the candidate set is still the conservative superset above.
 
-**Alternatives:** `updated:since..until` loses later-changed PRs; `closed:window` loses earlier
-closures. A lower updated bound also relies on an undocumented update invariant. Avoid these
-optimizations in the MVP. No automatic time-splitting of capped search is proposed.
+**Rationale:** Current-record date filters cannot establish an earlier closure erased by later
+reopening, so discovery must stay wide. Reading history for every candidate, however, made the
+default `any` query unusable: on a 600-PR repository it spent 495 of 500 requests on records
+last touched 18 months earlier, exhausted the budget before reaching the one PR merged inside
+the window, and returned zero matches. Opening, merging, closing, and reopening each advance
+`updated_at` — the behaviour GitHub's own incremental polling relies on, via the documented
+`since` parameter on issue listing and the `updated:` search qualifier — so a record updated
+before `since` holds no qualifying occurrence.
+
+**Limits:** GitHub documents `updated_at` for change detection but publishes no per-event
+guarantee, so this remains an inference rather than a contract. It is therefore disclosed
+rather than assumed: a run that skipped records emits a `history-bounded` disclosure naming the
+count and the invariant. Coverage stays complete, because the bound is a selection rule applied
+to every candidate alike and not an interrupted read; a consumer that rejects the inference can
+see exactly how many records it affected. If the invariant were ever violated, the failure mode
+is a missed occurrence on a record with a stale timestamp — which the disclosure makes visible.
+
+**Alternatives:** `updated:since..until` as a *discovery* bound still loses later-changed PRs
+and is still rejected; `closed:window` loses earlier closures. Reading every candidate's
+history was the original choice and is rejected above on measured cost. Disabling the bound
+behind a flag was considered and rejected as MVP surface area. No automatic time-splitting of
+capped search is proposed.
 
 Source: [GitHub PR search qualifiers](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests).
 

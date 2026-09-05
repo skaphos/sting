@@ -53,8 +53,10 @@ Extend [ADR 0010](0010-multi-tool-mcp-server.md)'s separate-tool pattern:
 Historical queries may scan a broad candidate set and spend most of their budget recovering
 history. A narrow window does not imply cheap search or freedom from search's candidate cap.
 Lifecycle recovery is confined to candidates whose latest update falls at or after the window
-start; earlier records are excluded on their own evidence, so a long-lived backlog cannot
-consume the budget before newer qualifying work is examined.
+start, so a long-lived backlog cannot consume the budget before newer qualifying work is
+examined. That bound relies on update timestamps advancing with each lifecycle event, which the
+provider documents for change detection but does not guarantee per event, so affected runs
+disclose it explicitly (see research R2).
 Inbox reviewer search may require repository-level verification to distinguish direct requests.
 These costs and limitations are explicit in structured output.
 

@@ -15,6 +15,8 @@ import (
 
 // loadPRConfig keeps shared decoding strict while leaving workflow validation
 // to the selected resolver. An unused activity default must not block the inbox.
+// Unlike loadConfig, an unreadable config file is fatal here: PR defaults that
+// cannot be read must not be silently replaced by built-in ones.
 func loadPRConfig() (config.Config, error) {
 	if configReadErr != nil {
 		return config.Config{}, fmt.Errorf("read config: check file syntax and access")

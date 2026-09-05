@@ -36,3 +36,26 @@ func TestPRApplicableConfig(t *testing.T) {
 		t.Fatal("accepted invalid field type")
 	}
 }
+
+// The startup warning in root.go promises this split, so pin it: an unreadable
+// config leaves query and activity on defaults while the PR workflows refuse to
+// run on defaults they cannot confirm.
+func TestUnreadableConfigIsFatalOnlyForPRWorkflows(t *testing.T) {
+	isolateHome(t)
+	seedValidConfig(t)
+	oldErr := configReadErr
+	t.Cleanup(func() { configReadErr = oldErr })
+
+	configReadErr = errors.New("parse failure")
+	if _, err := loadConfig(); err != nil {
+		t.Fatalf("commit and activity queries must continue from defaults: %v", err)
+	}
+	if _, err := loadPRConfig(); err == nil {
+		t.Fatal("PR workflows accepted a config they could not read")
+	}
+
+	configReadErr = nil
+	if _, err := loadPRConfig(); err != nil {
+		t.Fatalf("readable config rejected: %v", err)
+	}
+}
