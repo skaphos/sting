@@ -140,6 +140,9 @@ func loadConfig() (config.Config, error) {
 
 // Execute runs the root command and exits with a shell-friendly status.
 func Execute() {
+	// Cobra's Print helpers otherwise default to stderr. Evidence belongs on
+	// stdout so JSON remains pipeable, including before a partial-result error.
+	rootCmd.SetOut(os.Stdout)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "sting: "+err.Error())
 		os.Exit(1)

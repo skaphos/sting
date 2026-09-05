@@ -43,6 +43,11 @@ func TestActivityRetainsFailedStages(t *testing.T) {
 					if r.URL.Query().Get("page") == "2" {
 						if stage == "cancellation" {
 							cancel()
+							// Wait for the client to observe cancellation and
+							// close the request. Sending a 500 here races the
+							// cancellation and makes the asserted error OS-dependent.
+							<-r.Context().Done()
+							return
 						}
 						http.Error(w, "listing outage", 500)
 						return

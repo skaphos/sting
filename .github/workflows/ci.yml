@@ -93,6 +93,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Run CLI and MCP integration tests
+        run: go -C tools tool task test-integration
+
   quality:
     name: Static Analysis
     runs-on: ubuntu-latest
@@ -141,7 +152,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [dco, reuse, lint, test, quality, manifests]
+    needs: [dco, reuse, lint, test, integration, quality, manifests]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -159,7 +170,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [dco, reuse, lint, test, quality, manifests, build]
+    needs: [dco, reuse, lint, test, integration, quality, manifests, build]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Publish workflow summary
@@ -168,17 +179,18 @@ jobs:
           REUSE_RESULT: ${{ needs.reuse.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           MANIFESTS_RESULT: ${{ needs.manifests.result }}
           BUILD_RESULT: ${{ needs.build.result }}
         run: |
-          total=7
+          total=8
           success=0
           failed=0
           skipped=0
           cancelled=0
 
-          for result in "$DCO_RESULT" "$REUSE_RESULT" "$LINT_RESULT" "$TEST_RESULT" "$QUALITY_RESULT" "$MANIFESTS_RESULT" "$BUILD_RESULT"; do
+          for result in "$DCO_RESULT" "$REUSE_RESULT" "$LINT_RESULT" "$TEST_RESULT" "$INTEGRATION_RESULT" "$QUALITY_RESULT" "$MANIFESTS_RESULT" "$BUILD_RESULT"; do
             case "$result" in
               success) success=$((success + 1)) ;;
               failure) failed=$((failed + 1)) ;;
@@ -197,6 +209,7 @@ jobs:
             echo "| reuse | $REUSE_RESULT |"
             echo "| lint | $LINT_RESULT |"
             echo "| test | $TEST_RESULT |"
+            echo "| integration | $INTEGRATION_RESULT |"
             echo "| quality | $QUALITY_RESULT |"
             echo "| manifests | $MANIFESTS_RESULT |"
             echo "| build | $BUILD_RESULT |"
@@ -213,6 +226,7 @@ jobs:
               if [ "$REUSE_RESULT" = "failure" ]; then echo "- reuse failed"; fi
               if [ "$LINT_RESULT" = "failure" ]; then echo "- lint failed"; fi
               if [ "$TEST_RESULT" = "failure" ]; then echo "- test failed"; fi
+              if [ "$INTEGRATION_RESULT" = "failure" ]; then echo "- integration failed"; fi
               if [ "$QUALITY_RESULT" = "failure" ]; then echo "- quality failed"; fi
               if [ "$MANIFESTS_RESULT" = "failure" ]; then echo "- manifests failed"; fi
               if [ "$BUILD_RESULT" = "failure" ]; then echo "- build failed"; fi

@@ -489,8 +489,16 @@ default for a single invocation. See `config.example.yaml`.
 ```sh
 task tidy vet test # tidy + vet + test
 task test-race     # tests under the race detector
+go -C tools tool task test-integration # built CLI and MCP stdio end-to-end tests
 task run -- --author octocat --scope repos --repos octocat/Hello-World --since 2008-01-01
 ```
+
+CI publishes a required `Integration Tests` check on every pull request. The
+suite builds sting, executes CLI queries, and initializes/calls both MCP tools
+over stdio against local HTTP fixtures, with isolated configuration and home
+directories. It checks JSON stdout, nonzero exits with retained partial
+evidence, read-only tool annotations, and structured MCP results. It requires
+no provider credentials or external API access and also runs in `task ci`.
 
 Package and API reference (godoc):
 
