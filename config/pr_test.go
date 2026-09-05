@@ -78,3 +78,20 @@ func TestPRTargetDefaultsAndOverrides(t *testing.T) {
 		t.Fatal("invalid page size")
 	}
 }
+
+// max_prs belongs to the PR workflows: Config.Validate must tolerate it so an
+// invalid PR default cannot reject unrelated commit and activity tool calls,
+// while both PR resolvers still reject it before any provider access.
+func TestNegativeMaxPRsRejectedOnlyByPRResolvers(t *testing.T) {
+	cfg := Default()
+	cfg.MaxPRs = -1
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("PR default rejected an unrelated workflow: %v", err)
+	}
+	if _, err := cfg.ResolvePRInbox(PRInboxRequest{User: "octocat"}); err == nil {
+		t.Fatal("inbox accepted a negative max_prs")
+	}
+	if _, err := cfg.ResolvePRs(PRRequest{Author: "octocat"}, time.Now()); err == nil {
+		t.Fatal("activity accepted a negative max_prs")
+	}
+}

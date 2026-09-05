@@ -399,7 +399,10 @@ FR-023 defines activity history recovery; FR-024 defines evidence completeness f
 - **FR-023**: Activity queries MUST recover qualifying opened/merged/closed occurrences even
   when later PR changes remove or replace the corresponding current-record timestamps.
   Discovery MUST account for this history, not exclude candidates solely because their latest
-  update or closure is outside the window. Within accessible history and sufficient budget,
+  update or closure falls after the window. A record whose latest update precedes the window
+  start is the provider's own proof that no qualifying occurrence lies inside it, since every
+  opening, merge, closure, and reopening advances that timestamp; such a record MAY be excluded
+  without a lifecycle request and without claiming a coverage gap. Within accessible history and sufficient budget,
   preserve each matching occurrence with its action and timestamp. If discovery or history
   retrieval cannot complete, retain confirmed matches and disclose the affected coverage.
 - **FR-024**: A returned PR MUST have at least one confirmed activity action/time match or inbox

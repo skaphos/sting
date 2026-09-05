@@ -208,6 +208,16 @@ func selectedPRMatches(matches []model.PRMatch, q model.PRQuery) []model.PRMatch
 	})
 	return out
 }
+
+// prBeforeWindow reports records that provably hold no in-window occurrence.
+// GitHub bumps updated_at on every open, merge, close, and reopen, so a record
+// last updated before the window cannot carry a qualifying action inside it.
+// Excluding it costs no evidence: the record itself is the proof, so no
+// lifecycle request is spent and no coverage gap is claimed. This does not
+// exclude candidates updated after the window, whose history FR-023 requires.
+func prBeforeWindow(p model.PullRequest, q model.PRQuery) bool {
+	return p.UpdatedAt != nil && p.UpdatedAt.Before(q.Since)
+}
 func prHistoryNeeded(p model.PullRequest, q model.PRQuery) bool {
 	return q.TimeBasis == model.PRTimeAny || q.TimeBasis == model.PRTimeClosed || (q.TimeBasis == model.PRTimeMerged && p.MergedAt == nil) || (q.State != model.PRStateAll && p.State == nil)
 }

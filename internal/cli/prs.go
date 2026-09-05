@@ -119,7 +119,7 @@ func runPRs(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(cmd.Context(), queryTimeout)
 	defer cancel()
 	result, collectErr := collectPRActivity(ctx, cfg, q)
 	if result.SchemaVersion != "" {

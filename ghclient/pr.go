@@ -21,6 +21,7 @@ type prSession struct {
 	privateRepos map[string]bool
 	closedIssues map[string]bool
 	client       *Client
+	missingMeta  map[string]int
 	counts       model.PRCostReport
 	coverage     model.PRCoverage
 	disclosures  []model.PRDisclosure
@@ -34,7 +35,7 @@ func (c *Client) newPRSession(limit int) (*prSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &prSession{client: client, privateRepos: map[string]bool{}, closedIssues: map[string]bool{}, counts: model.PRCostReport{Ceiling: limit}, coverage: model.PRCoverage{DiscoveryComplete: true, EvidenceComplete: true}, disclosures: []model.PRDisclosure{}}, nil
+	return &prSession{client: client, privateRepos: map[string]bool{}, closedIssues: map[string]bool{}, missingMeta: map[string]int{}, counts: model.PRCostReport{Ceiling: limit}, coverage: model.PRCoverage{DiscoveryComplete: true, EvidenceComplete: true}, disclosures: []model.PRDisclosure{}}, nil
 }
 func (s *prSession) do(category string, call func() error) error {
 	before := s.client.budget.Consumed()
@@ -60,7 +61,48 @@ func (s *prSession) cost() model.PRCostReport {
 	return out
 }
 func (s *prSession) note(kind, reason, repo string, number int) {
-	s.disclosures = append(s.disclosures, model.PRDisclosure{Kind: kind, Reason: reason, Repo: repo, Number: number})
+	s.disclosures = append(s.disclosures, model.PRDisclosure{Kind: kind, Reason: reason, NextAction: prNextAction(kind), Repo: repo, Number: number})
+}
+
+// prNextAction keeps recovery guidance in the structured field rather than in
+// prose, so an agent consuming JSON reads the same next step the report prints.
+// Selection facts and absent optional metadata have no safe next action.
+func prNextAction(kind string) string {
+	switch kind {
+	case "request-budget":
+		return "Raise max_requests or narrow the targets, then re-run."
+	case "result-limit":
+		return "Raise max_prs or narrow the targets to collect the remaining PRs."
+	case "search-capped":
+		return "Use repos or org scope, or split the window into shorter ranges."
+	case "search-incomplete":
+		return "Retry the query, or use repos/org listing for complete discovery."
+	case "pagination-limit":
+		return "Narrow the targets; the provider offered more pages than sting follows."
+	case "repo-skipped":
+		return "Verify access to the repository, or exclude it from the query."
+	case "history-incomplete":
+		return "Raise max_requests and re-run; the actions shown are confirmed but the history is not complete."
+	case "history-ambiguous":
+		return "Inspect the PR in the provider; sting will not infer an unproven action."
+	case "reasons-incomplete":
+		return "Re-run with explicit repos or org targets so relationships can be verified."
+	case "identity-unresolved":
+		return "Run sting auth github, or supply an explicit user."
+	case "provider-error":
+		return "Check target access and sting's dedicated credentials, then retry."
+	case "provider-changed":
+		return "Re-run the query; the provider state changed during collection."
+	}
+	return ""
+}
+
+// missingMetadata defers optional-field gaps so one disclosure covers every
+// record sharing a field set. Per-record attribution stays in missing_fields.
+func (s *prSession) missingMetadata(p model.PullRequest) {
+	if len(p.MissingFields) > 0 {
+		s.missingMeta[strings.Join(p.MissingFields, ", ")]++
+	}
 }
 func (s *prSession) gap(kind, reason, repo string, number int) {
 	s.coverage.EvidenceComplete = false
@@ -71,6 +113,9 @@ func (s *prSession) discoveryGap(kind, reason, repo string) {
 	s.gap(kind, reason, repo, 0)
 }
 func (s *prSession) finish() {
+	for fields, n := range s.missingMeta {
+		s.note("metadata-unavailable", fmt.Sprintf("Discovery did not supply %s for %d PR records; each record lists its own missing_fields.", fields, n), "", 0)
+	}
 	slices.SortFunc(s.disclosures, func(a, b model.PRDisclosure) int {
 		return strings.Compare(fmt.Sprintf("%s/%s/%09d/%s/%s", a.Kind, a.Repo, a.Number, a.Stream, a.Reason), fmt.Sprintf("%s/%s/%09d/%s/%s", b.Kind, b.Repo, b.Number, b.Stream, b.Reason))
 	})
@@ -113,7 +158,7 @@ func (s *prSession) stop(err error, op, repo string) error {
 		return nil
 	}
 	if errors.Is(err, apibudget.ErrBudgetExceeded) {
-		s.discoveryGap("request-budget", "Request ceiling reached; narrow targets or increase max_requests.", repo)
+		s.discoveryGap("request-budget", "Request ceiling reached.", repo)
 		return nil
 	}
 	s.discoveryGap("provider-error", op+": "+prErrorReason(err), repo)
@@ -357,7 +402,7 @@ func (s *prSession) walkPROrg(ctx context.Context, org string, visit func(string
 		for i, name := range names {
 			if err = visit(name); err != nil {
 				if reason, skip := skipRepoReason(err); skip {
-					s.discoveryGap("repo-skipped", reason+"; verify repository access or retry.", name)
+					s.discoveryGap("repo-skipped", reason, name)
 				} else {
 					kind := "provider-error"
 					if errors.Is(err, apibudget.ErrBudgetExceeded) {

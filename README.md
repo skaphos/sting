@@ -455,6 +455,54 @@ but subject to the indexing caveats above.
 `--window` accepts `7d`, `2w`, `48h`, `30m`, etc. `--since`/`--until` accept
 `YYYY-MM-DD` or RFC3339. `--since` overrides `--window`; `--until` defaults to now.
 
+## Pull request activity
+
+`sting prs --author octocat --window 7d` reports PR openings, merges, and unmerged
+closures during the window, including closures followed by later reopening. Remaining
+open does not qualify by itself; `--time-basis updated` explicitly selects latest updates.
+Current state defaults to `all`, and drafts are included. `--state closed` means currently
+closed without a merge. The MCP equivalent is `get_prs`.
+
+Results carry an independent schema, qualifying action timestamps, current metadata,
+request costs, and separate discovery/evidence completeness. Defaults are 100 PRs and
+500 requests; explicit zero disables the selected cap. Lifecycle history uses extra
+budgeted requests per candidate whose record could still hold an in-window action; a PR last
+updated before the window is skipped without a request, because every opening, merge, closure,
+and reopening advances that timestamp. Optional PR details, diffs, and checks are not fetched.
+Every disclosure carries a `next_action` when a safe one exists, and unavailable optional
+metadata is summarized once per field set, with per-record detail in each `missing_fields`.
+Unrestricted search is public-only and subject to GitHub search coverage limits. Use
+explicit targets for credential-visible private work. `include_prs` on commit queries
+still means commit discovery from open PR branches. PR activity is GitHub-only.
+
+Repository activity also supports `sting prs --scope repos --repos acme/api,acme/web`
+without an author filter. `sting prs --scope org --org acme` enumerates accessible repositories
+and discloses individual unreadable targets. Authentication and rate-limit failures stop
+collection while preserving evidence. Each scope uses the configured activity window.
+
+## Personal PR inbox
+
+`sting inbox --scope org --org acme` finds currently open PRs you authored, are assigned
+to, or are directly requested to review. Older work stays eligible; drafts are included.
+`--user octocat` overrides the user resolved from sting's dedicated GitHub credential.
+Use `--no-draft` to exclude drafts. The MCP equivalent is `get_pr_inbox`.
+
+All three reasons are combined and labeled on one entry per PR. Team-only requests,
+fulfilled/removed requests without another current relationship, and completed PRs do
+not qualify. Search verifies relationships through repository PR pages, which share the
+request budget. Provider changes and interrupted verification are disclosed; an incomplete
+report may not contain every match. Neither workflow assigns, reviews, closes, or merges PRs.
+
+For example, `sting prs --scope org --org acme --time-basis closed --window 2w -o json`
+asks what closed during the window; `sting inbox --scope repos --repos acme/api -o json`
+asks what needs attention now. JSON carries all evidence; Markdown displays its facts.
+Own request/result caps return successful partial reports. Provider/identity failures return
+partial evidence with a nonzero CLI exit or MCP `IsError`, including when no PRs were found.
+
+MCP validates shared settings at startup and workflow-specific settings before each call.
+An invalid activity default cannot block the inbox; an affected activity call fails locally.
+Malformed configuration or invalid shared settings still prevent MCP startup.
+
 ## Configuration
 
 Resolved in increasing precedence: built-in defaults → config file → environment
@@ -548,47 +596,3 @@ internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)
 Skaphos is a project of [Rillan AI LLC](https://skaphos.io), a Missouri
 limited liability company. © 2026 Rillan AI LLC. Released under
 the [MIT License](./LICENSE).
-
-## Pull request activity
-
-`sting prs --author octocat --window 7d` reports PR openings, merges, and unmerged
-closures during the window, including closures followed by later reopening. Remaining
-open does not qualify by itself; `--time-basis updated` explicitly selects latest updates.
-Current state defaults to `all`, and drafts are included. `--state closed` means currently
-closed without a merge. The MCP equivalent is `get_prs`.
-
-Results carry an independent schema, qualifying action timestamps, current metadata,
-request costs, and separate discovery/evidence completeness. Defaults are 100 PRs and
-500 requests; explicit zero disables the selected cap. Lifecycle history uses extra
-budgeted requests per candidate; optional PR details, diffs, and checks are not fetched.
-Unrestricted search is public-only and subject to GitHub search coverage limits. Use
-explicit targets for credential-visible private work. `include_prs` on commit queries
-still means commit discovery from open PR branches. PR activity is GitHub-only.
-
-Repository activity also supports `sting prs --scope repos --repos acme/api,acme/web`
-without an author filter. `sting prs --scope org --org acme` enumerates accessible repositories
-and discloses individual unreadable targets. Authentication and rate-limit failures stop
-collection while preserving evidence. Each scope uses the configured activity window.
-
-## Personal PR inbox
-
-`sting inbox --scope org --org acme` finds currently open PRs you authored, are assigned
-to, or are directly requested to review. Older work stays eligible; drafts are included.
-`--user octocat` overrides the user resolved from sting's dedicated GitHub credential.
-Use `--no-draft` to exclude drafts. The MCP equivalent is `get_pr_inbox`.
-
-All three reasons are combined and labeled on one entry per PR. Team-only requests,
-fulfilled/removed requests without another current relationship, and completed PRs do
-not qualify. Search verifies relationships through repository PR pages, which share the
-request budget. Provider changes and interrupted verification are disclosed; an incomplete
-report may not contain every match. Neither workflow assigns, reviews, closes, or merges PRs.
-
-For example, `sting prs --scope org --org acme --time-basis closed --window 2w -o json`
-asks what closed during the window; `sting inbox --scope repos --repos acme/api -o json`
-asks what needs attention now. JSON carries all evidence; Markdown displays its facts.
-Own request/result caps return successful partial reports. Provider/identity failures return
-partial evidence with a nonzero CLI exit or MCP `IsError`, including when no PRs were found.
-
-MCP validates shared settings at startup and workflow-specific settings before each call.
-An invalid activity default cannot block the inbox; an affected activity call fails locally.
-Malformed configuration or invalid shared settings still prevent MCP startup.

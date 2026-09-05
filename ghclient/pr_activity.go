@@ -26,6 +26,11 @@ func (c *Client) CollectPRs(ctx context.Context, q model.PRQuery) (model.PRResul
 	}
 	result := model.PRResult{SchemaVersion: model.PRSchemaVersion, Workflow: "pr-activity", Provider: model.ProviderGitHub, GeneratedAt: time.Now().UTC(), Query: q, PRs: []model.PRActivityEntry{}}
 	s.selectionNotes(q.Scope, q.Repos, q.Org)
+	if q.Author != "" {
+		s.note("role", "Author-filtered activity: role=author selects PRs opened by "+q.Author+".", "", 0)
+	} else {
+		s.note("role", "No author filter: every author in the resolved targets is included.", "", 0)
+	}
 	s.note("time-basis", "Activity selects "+string(q.TimeBasis)+" in the inclusive resolved window; current state is a separate filter.", "", 0)
 	if q.TimeBasis == model.PRTimeUpdated {
 		s.note("time-basis", "Updated matching uses only the latest recorded update, not every historical update.", "", 0)
@@ -153,7 +158,7 @@ func (s *prSession) searchPage(ctx context.Context, query string, page int) ([]m
 	var resp *github.Response
 	perPage := s.client.perPage
 	if (page-1)*perPage >= 1000 {
-		s.discoveryGap("search-capped", "Search candidate ceiling reached; use repos/org scope.", "")
+		s.discoveryGap("search-capped", "Search candidate ceiling reached.", "")
 		return nil, 0, nil
 	}
 	err := s.do("discovery", func() error {
@@ -175,14 +180,14 @@ func (s *prSession) searchPage(ctx context.Context, query string, page int) ([]m
 		return out, 0, nil
 	}
 	if found.GetIncompleteResults() {
-		s.discoveryGap("search-incomplete", "Provider search reported incomplete results; narrow targets or use listing.", "")
+		s.discoveryGap("search-incomplete", "Provider search reported incomplete results.", "")
 	}
 	next := 0
 	if resp != nil {
 		next = resp.NextPage
 	}
 	if found.GetTotal() > 1000 || (next > 0 && (next-1)*s.client.perPage >= 1000) {
-		s.discoveryGap("search-capped", "Search exposes at most 1,000 candidates; use repos/org scope.", "")
+		s.discoveryGap("search-capped", "Search exposes at most 1,000 candidates.", "")
 	}
 	if next > 0 && (next-1)*s.client.perPage >= 1000 {
 		next = 0
@@ -260,13 +265,14 @@ func (s *prSession) activityPage(ctx context.Context, q model.PRQuery, page []mo
 			continue
 		}
 		seen[id] = true
+		if prBeforeWindow(p, q) {
+			continue
+		}
 		match, known := prFilter(p, q)
 		if known && !match {
 			continue
 		}
-		if len(p.MissingFields) > 0 {
-			s.note("metadata-unavailable", "Unavailable metadata: "+strings.Join(p.MissingFields, ", "), p.Repo, p.Number)
-		}
+		s.missingMetadata(p)
 		candidates = append(candidates, p)
 		matches := selectedPRMatches(recordPRMatches(p), q)
 		if match && len(matches) > 0 {

@@ -128,6 +128,9 @@ func Defaults() map[string]any {
 }
 
 // Validate checks that the resolved configuration is internally consistent.
+// It covers shared and commit/activity settings. max_prs is deliberately
+// excluded: ResolvePRs and ResolvePRInbox own it, so an invalid PR default
+// rejects only the PR workflows instead of unrelated commit and activity calls.
 func (cfg Config) Validate() error {
 	if cfg.DefaultProvider != "" && !cfg.DefaultProvider.Valid() {
 		return fmt.Errorf("invalid provider %q (want github|gitlab)", cfg.DefaultProvider)
@@ -140,9 +143,6 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return fmt.Errorf("per_page must be 1-100, got %d", cfg.PerPage)
-	}
-	if cfg.MaxPRs < 0 {
-		return fmt.Errorf("max_prs must be >= 0, got %d", cfg.MaxPRs)
 	}
 	if cfg.MaxCommits < 0 {
 		return fmt.Errorf("max_commits must be >= 0, got %d", cfg.MaxCommits)

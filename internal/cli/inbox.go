@@ -4,7 +4,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/internal/commitclient"
@@ -50,7 +49,7 @@ func runInbox(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(cmd.Context(), queryTimeout)
 	defer cancel()
 	result, collectErr := collectPRInbox(ctx, cfg, q)
 	if result.SchemaVersion != "" {

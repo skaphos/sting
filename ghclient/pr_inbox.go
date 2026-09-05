@@ -150,9 +150,7 @@ func (i *prInboxCollector) admit(p model.PullRequest, search bool) {
 		return
 	}
 	i.entries[id] = model.PRInboxEntry{PR: p, Reasons: reasons, ReasonsComplete: complete && !search}
-	if len(p.MissingFields) > 0 {
-		i.s.note("metadata-unavailable", "Unavailable metadata: "+strings.Join(p.MissingFields, ", "), p.Repo, p.Number)
-	}
+	i.s.missingMetadata(p)
 }
 func (i *prInboxCollector) changed(p model.PullRequest) {
 	i.s.gap("provider-changed", "Repository verification contradicts search evidence; no transactional snapshot is claimed.", p.Repo, p.Number)
