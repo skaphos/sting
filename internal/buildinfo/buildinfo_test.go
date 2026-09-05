@@ -145,26 +145,9 @@ func TestKnown(t *testing.T) {
 	if !(Info{Version: "v1.0.0"}).Known() {
 		t.Error("Info with a version reported Known() = false")
 	}
-	// A revision-only build is deliberately not "known": the updater cannot
-	// compare a revision against a release tag.
+	// A revision-only build has an identity but no usable version string.
 	if (Info{Revision: "abc"}).Known() {
 		t.Error("revision-only Info reported Known() = true")
-	}
-}
-
-func TestSourceString(t *testing.T) {
-	for _, tt := range []struct {
-		src  Source
-		want string
-	}{
-		{SourceLDFlags, "release build"},
-		{SourceBuildInfo, "build metadata"},
-		{SourceUnknown, "unavailable"},
-		{Source(99), "unavailable"},
-	} {
-		if got := tt.src.String(); got != tt.want {
-			t.Errorf("Source(%d).String() = %q, want %q", tt.src, got, tt.want)
-		}
 	}
 }
 

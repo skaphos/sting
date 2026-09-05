@@ -31,18 +31,6 @@ const (
 	SourceLDFlags
 )
 
-// String renders the source for human-readable output.
-func (s Source) String() string {
-	switch s {
-	case SourceLDFlags:
-		return "release build"
-	case SourceBuildInfo:
-		return "build metadata"
-	default:
-		return "unavailable"
-	}
-}
-
 // Info is what a binary knows about itself. Every field is best-effort: an
 // empty string means "not recorded", never "zero".
 type Info struct {
@@ -53,8 +41,8 @@ type Info struct {
 	Source   Source
 }
 
-// Known reports whether a usable version string was resolved. The update path
-// uses this to decide whether it can compare against the latest release at all.
+// Known reports whether a usable version string was resolved, rather than
+// revision-only metadata or no recorded identity.
 func (i Info) Known() bool { return i.Version != "" }
 
 // devSentinel is the historical default of the ldflags Version variable. A
