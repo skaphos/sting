@@ -83,9 +83,8 @@ func TestVersionCommandOutput(t *testing.T) {
 	}
 }
 
-// TestResolvedIsSingleSource guards FR-005: the version command and the update
-// path must read the same resolver, so they cannot disagree about what is
-// running.
+// TestResolvedIsSingleSource ensures version output uses the shared build
+// metadata resolver without introducing a separate precedence policy.
 func TestResolvedIsSingleSource(t *testing.T) {
 	if got := resolved(); got != buildinfo.Resolve(Version, Commit, Date) {
 		t.Errorf("resolved() diverged from buildinfo.Resolve: %+v", got)
