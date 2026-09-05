@@ -30,7 +30,7 @@ type GetRepoActivityInput struct {
 	Author        string `json:"author,omitempty" jsonschema:"optional: narrow the commit list to one author; the change set still covers all authors and says so"`
 	IncludeDiffs  *bool  `json:"include_diffs,omitempty" jsonschema:"opt in to bounded patch text in the change set; defaults to false"`
 	MaxDiffBytes  int    `json:"max_diff_bytes,omitempty" jsonschema:"patch byte cap when include_diffs is true; defaults to server config"`
-	EnrichCommits *int   `json:"enrich_commits,omitempty" jsonschema:"fetch per-commit file data for this many of the newest commits, enabling observed (rather than inferred) path attribution; costs one request each; defaults to 0"`
+	EnrichCommits *int   `json:"enrich_commits,omitempty" jsonschema:"fetch per-commit file data for this many of the newest commits, enabling observed (rather than inferred) path attribution; costs at least one request each; defaults to 0"`
 	MaxRequests   *int   `json:"max_requests,omitempty" jsonschema:"cap provider requests for this call; defaults to the server default of 500; set 0 only for an intentional uncapped run"`
 	EstimateOnly  bool   `json:"estimate_only,omitempty" jsonschema:"report projected cost and remaining quota without gathering evidence"`
 }
@@ -53,10 +53,8 @@ var collectActivity = func(ctx context.Context, cfg config.Config, q model.Activ
 // crash the whole long-lived stdio server; the deferred recover converts it into
 // a tool-level error result.
 //
-// Ordinary errors are returned as the handler's error value rather than folded
-// into a success result: the go-sdk marshals the structured Out value only when
-// the error is nil, so a failure never emits a schema-shaped, zero-value payload
-// alongside the IsError text.
+// Errors before collection return a Go error. Partial failures return IsError
+// with a nil Go error so the SDK transmits both text and structured evidence.
 //
 // A budget or quota stop is deliberately NOT an error — CollectActivity returns
 // a populated result plus a disclosure, and surfacing that as a failure would
@@ -71,6 +69,7 @@ func (h *handler) getRepoActivity(ctx context.Context, _ *mcp.CallToolRequest, i
 	}()
 
 	req := config.ActivityRequest{
+		Provider:     string(model.ProviderGitHub),
 		Repo:         in.Repo,
 		Ref:          in.Ref,
 		Since:        in.Since,
@@ -102,12 +101,13 @@ func (h *handler) getRepoActivity(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	result, cerr := collectActivity(ctx, h.cfg, q)
-	if cerr != nil {
+	if cerr != nil && result.SchemaVersion == "" {
 		return nil, model.ActivityResult{}, cerr
 	}
 
 	md := render.ActivityMarkdown(result)
 	return &mcp.CallToolResult{
+		IsError: cerr != nil,
 		Content: []mcp.Content{&mcp.TextContent{Text: md}},
 	}, result, nil
 }

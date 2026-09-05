@@ -131,9 +131,9 @@ func TestEstimateActivityEmptyWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EstimateActivity: %v", err)
 	}
-	// Nothing to list and nothing to compare: only the probe.
-	if report.Estimated != 1 {
-		t.Errorf("Estimated = %d, want 1 (the probe alone) for an empty window", report.Estimated)
+	// The collecting run still lists once to verify the empty window.
+	if report.Estimated != 2 {
+		t.Errorf("Estimated = %d, want 2 (probe + empty listing)", report.Estimated)
 	}
 }
 

@@ -277,7 +277,7 @@ sting activity --repo skaphos/sting --window 30d --estimate
 # Cap what a run may consume. A bounded run still exits 0.
 sting activity --repo skaphos/sting --window 90d --max-requests 50
 
-# Attribute changed paths to specific commits. Costs one request per commit.
+# Attribute changed paths to specific commits. Costs at least one request per commit.
 sting activity --repo skaphos/sting --window 7d --enrich-commits 5
 ```
 
@@ -286,6 +286,20 @@ aggregate per-file change set, the correlations between them, and a cost report.
 It stays cheap by construction — the request count grows with commit *pages*,
 not commit count, so a 250-commit window costs about five requests rather than
 about 250.
+
+The comparison is collected before optional per-commit enrichment. Enrichment
+fetches commits and their file pages in order, so a small request budget retains
+the same subset each run. File pagination can cost more than one request per
+commit; estimates assume one file page per enriched commit and can understate
+that cost. Estimates include their own probes and do not gather evidence.
+
+JSON includes `commits_collected`, `change_set_collected`, and `estimate_only`
+flags to distinguish verified empty results from stages that never completed.
+Provider file caps and other limitations still appear in disclosures. On a
+provider error or cancellation, gathered commits, file pages, and comparisons
+are retained with a `collection-failed` disclosure: the CLI prints them before
+exiting nonzero, and MCP returns them in a tool error result. Partial enrichment
+retains `files` but leaves `enriched` false until all file pages are fetched.
 
 ### What it does not cover
 
@@ -297,13 +311,18 @@ about 250.
   branches, forks, or unmerged pull requests is not included.
 - **`--author` narrows the commits, not the change set.** A boundary comparison
   has no notion of authorship, so the change set covers every author who touched
-  the reference in the window. The result says so explicitly.
+  the reference in the window. Boundaries come from an unfiltered listing;
+  a second, author-filtered listing supplies the commit view, even when that
+  author has no matches. These extra listing pages (and an extra estimate probe)
+  are included in request accounting. The result says so explicitly.
 - **Attribution is labeled.** Correlations are `observed` only when per-commit
   data was actually fetched (`--enrich-commits`); otherwise they are `inferred`
   from a declared rule, and paths matching no rule are left unattributed rather
   than guessed at.
 - **GitHub only.** `--provider gitlab` is rejected with a specific message;
-  GitLab commit queries via `sting query` are unaffected.
+  GitLab commit queries via `sting query` are unaffected. The GitHub-only MCP
+  activity tool selects GitHub even when the server defaults to GitLab for
+  `get_commits`.
 - **Windows are bounded by committer date**, which GitHub's API filters on. That
   differs from author date after a rebase, cherry-pick, or amend; the result
   records which basis was used.

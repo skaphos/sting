@@ -45,7 +45,7 @@ func registerActivityFlags(cmd *cobra.Command) {
 	f.String("author", "", "narrow the commit list to one author (the change set still covers all authors)")
 	f.Bool("include-diffs", false, "include bounded patch text in the change set")
 	f.Int("max-diff-bytes", 0, "patch byte cap when --include-diffs is set (0 = config default)")
-	f.Int("enrich-commits", 0, "fetch per-commit file data for this many of the newest commits, enabling observed (not just inferred) path attribution; costs one request each")
+	f.Int("enrich-commits", 0, "fetch per-commit file data for this many of the newest commits, enabling observed (not just inferred) path attribution; costs at least one request each")
 	f.Int("max-requests", 0, "cap provider requests for this run (0 = uncapped; default from config)")
 	f.Bool("estimate", false, "report the projected cost and remaining quota without gathering evidence")
 	f.StringP("format", "o", "", "output format: markdown|json")
@@ -129,17 +129,9 @@ func runActivity(cmd *cobra.Command, _ []string) error {
 	// A bounded result is a result: CollectActivity returns evidence plus a
 	// disclosure rather than an error when a ceiling or a quota stops it, so
 	// the command exits 0 and the caller keeps the partial evidence.
-	result, err := client.CollectActivity(ctx, q)
-	if err != nil {
-		return err
-	}
-
-	// An estimate is not a result, so it gets its own human-readable shape. JSON
-	// callers still receive the full contract, whose Cost carries the estimate
-	// and whose commit list is empty.
-	if q.EstimateOnly && outFormat == render.FormatMarkdown {
-		cmd.Print(render.ActivityEstimate(result.Cost))
-		return nil
+	result, collectErr := client.CollectActivity(ctx, q)
+	if collectErr != nil && result.SchemaVersion == "" {
+		return collectErr
 	}
 
 	out, err := render.RenderActivity(result, outFormat)
@@ -147,5 +139,5 @@ func runActivity(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	cmd.Println(out)
-	return nil
+	return collectErr
 }

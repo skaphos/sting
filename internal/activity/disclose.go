@@ -151,7 +151,8 @@ func AuthorFilterNotApplied(author string) model.Disclosure {
 		Kind: model.DisclosureAuthorFilterNotApplied,
 		Reason: fmt.Sprintf("The commit list is filtered to %s, but the change set is not: a "+
 			"boundary comparison has no notion of authorship, so it covers every author "+
-			"who touched the reference in this window.", author),
+			"who touched the reference in this window. Resolving unfiltered boundaries "+
+			"and the filtered commit view requires separate, metered listing pages.", author),
 		NextAction: "Use --enrich-commits to attribute paths to specific commits.",
 	}
 }
@@ -190,8 +191,8 @@ func EnrichmentPartial(delivered, requested int) model.Disclosure {
 	return model.Disclosure{
 		Kind: model.DisclosureEnrichmentPartial,
 		Reason: fmt.Sprintf("Per-commit detail was requested for %d commits but only %d could be "+
-			"fetched within the request budget. Paths touched only by the remaining "+
+			"fully fetched before gathering stopped. Paths touched only by the remaining "+
 			"commits carry inferred attribution at best.", requested, delivered),
-		NextAction: "Raise --max-requests to enrich the full subset.",
+		NextAction: "Retry after resolving the stop; raise --max-requests if the request ceiling was reached.",
 	}
 }

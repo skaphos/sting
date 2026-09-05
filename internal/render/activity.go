@@ -38,6 +38,7 @@ func ActivityEstimate(cost model.CostReport) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Estimated cost: %d provider requests.\n", cost.Estimated)
+	b.WriteString("Assumes one file page per enriched commit; pagination can increase the cost.\n")
 
 	if cost.Ceiling > 0 {
 		fmt.Fprintf(&b, "Ceiling: %d.", cost.Ceiling)
@@ -73,6 +74,11 @@ func activityJSON(r model.ActivityResult) (string, error) {
 
 func activityMarkdown(r model.ActivityResult) string {
 	var b strings.Builder
+	if r.EstimateOnly {
+		b.WriteString(ActivityEstimate(r.Cost))
+		writeActivityDisclosures(&b, r.Disclosures)
+		return b.String()
+	}
 
 	fmt.Fprintf(&b, "# Activity: %s\n\n", codeSpan(r.Repo))
 	writeActivityHeader(&b, r)
@@ -137,8 +143,13 @@ func basisLabel(basis string) string {
 
 func writeActivityCommits(b *strings.Builder, r model.ActivityResult) {
 	fmt.Fprintf(b, "## Commits (%d)\n\n", r.Count)
+	if !r.CommitsCollected {
+		b.WriteString("_Commit listing not completed; any commits below are partial evidence._\n\n")
+	}
 	if len(r.Commits) == 0 {
-		b.WriteString("_No commits in this window._\n\n")
+		if r.CommitsCollected {
+			b.WriteString("_No commits in this window matching the query._\n\n")
+		}
 		return
 	}
 	for _, c := range r.Commits {
@@ -184,6 +195,8 @@ func writeActivityChangeSet(b *strings.Builder, r model.ActivityResult) {
 	if len(cs.Paths) == 0 {
 		if r.Boundaries.Status == model.StatusDiverged {
 			b.WriteString("_Suppressed: the window's boundaries do not share ancestry._\n\n")
+		} else if !r.ChangeSetCollected {
+			b.WriteString("_Change set not collected: the window has not been fully compared._\n\n")
 		} else {
 			b.WriteString("_No file changes between the window's boundaries._\n\n")
 		}
