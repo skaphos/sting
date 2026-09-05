@@ -269,6 +269,78 @@ func TestSplitTOMLKeyQuoted(t *testing.T) {
 	}
 }
 
+func TestSplitTOMLKeyUsesTOMLSemantics(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want []string
+	}{
+		{name: "quoted whitespace retained", key: `mcp_servers." sting "`, want: []string{"mcp_servers", " sting "}},
+		{name: "unicode escape decoded", key: `mcp_servers."\u0073ting"`, want: []string{"mcp_servers", "sting"}},
+		{name: "quoted dot retained", key: `mcp_servers."sting.env"`, want: []string{"mcp_servers", "sting.env"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := splitTOMLKey(tt.key)
+			if err != nil {
+				t.Fatalf("splitTOMLKey(%q): %v", tt.key, err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitTOMLKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("splitTOMLKey(%q) = %v, want %v", tt.key, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestQuotedNonStingTablesSurviveInstallAndRemoval(t *testing.T) {
+	original := `[mcp_servers." sting "]
+command = "whitespace-server"
+
+[mcp_servers."sting.env"]
+command = "dot-server"
+`
+	path := writeTemp(t, "config.toml", original)
+	r, _ := ByName("codex")
+	if err := r.WriteEntry(path, Entry{Command: "/bin/sting", Args: []string{"mcp"}}); err != nil {
+		t.Fatalf("WriteEntry: %v", err)
+	}
+	afterWrite := readFile(t, path)
+	for _, want := range []string{original, "[mcp_servers.sting]", "/bin/sting"} {
+		if !strings.Contains(afterWrite, want) {
+			t.Fatalf("install did not preserve %q:\n%s", want, afterWrite)
+		}
+	}
+
+	removed, err := r.RemoveEntry(path)
+	if err != nil || !removed {
+		t.Fatalf("RemoveEntry: removed=%v err=%v", removed, err)
+	}
+	afterRemove := readFile(t, path)
+	if !strings.Contains(afterRemove, original) {
+		t.Fatalf("removal changed unrelated quoted tables:\n%s", afterRemove)
+	}
+	if strings.Contains(afterRemove, "/bin/sting") {
+		t.Fatalf("removal left the sting entry behind:\n%s", afterRemove)
+	}
+}
+
+func TestUnicodeEscapedStingHeaderMatchesSemanticIdentity(t *testing.T) {
+	path := writeTemp(t, "config.toml", "[mcp_servers.\"\\u0073ting\"]\ncommand = \"/old\"\n")
+	r, _ := ByName("codex")
+	if err := r.WriteEntry(path, Entry{Command: "/new", Args: []string{"mcp"}}); err != nil {
+		t.Fatalf("WriteEntry: %v", err)
+	}
+	got := readFile(t, path)
+	if !strings.Contains(got, "/new") || strings.Contains(got, "/old") {
+		t.Fatalf("semantic sting header was not updated:\n%s", got)
+	}
+}
+
 // TestQuotedStingHeaderMatches ensures a quoted table header still matches.
 func TestQuotedStingHeaderMatches(t *testing.T) {
 	seed := "[\"mcp_servers\".\"sting\"]\ncommand = \"/old\"\n"

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -156,8 +157,18 @@ func readJSONDoc(path string) (map[string]any, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("parse %q: %w", path, err)
 	}
+	// A single Decode accepts a valid object followed by another value or
+	// garbage. Require EOF after optional whitespace so a write can never
+	// silently discard bytes that were outside the first object.
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("parse %q: trailing JSON value", path)
+		}
+		return nil, fmt.Errorf("parse %q: trailing JSON data: %w", path, err)
+	}
 	if doc == nil {
-		doc = map[string]any{}
+		return nil, fmt.Errorf("parse %q: top-level JSON value is not an object", path)
 	}
 	return doc, nil
 }

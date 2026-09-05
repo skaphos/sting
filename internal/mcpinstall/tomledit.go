@@ -60,6 +60,9 @@ func upsertTOMLServer(path string, set map[string]any, mode fs.FileMode) error {
 		return err
 	}
 	spans := matchingSpans(raw, headers, stingPrefix())
+	if len(spans) > 0 && existing == nil {
+		return fmt.Errorf("refusing to modify %q: located sting table does not match the parsed TOML identity", path)
+	}
 	if len(spans) == 0 && existing != nil {
 		return fmt.Errorf("refusing to modify %q: sting entry is not a standard [mcp_servers.%s] table; edit manually", path, serverKey)
 	}
@@ -106,6 +109,9 @@ func deleteTOMLServer(path string, mode fs.FileMode) (bool, error) {
 		return false, err
 	}
 	spans := matchingSpans(raw, headers, stingPrefix())
+	if len(spans) > 0 && existing == nil {
+		return false, fmt.Errorf("refusing to modify %q: located sting table does not match the parsed TOML identity", path)
+	}
 	if len(spans) == 0 {
 		if existing != nil {
 			return false, fmt.Errorf("refusing to modify %q: sting entry is not a standard [mcp_servers.%s] table; edit manually", path, serverKey)
@@ -369,46 +375,39 @@ func parseTOMLHeader(raw []byte, start, lineStart int, path string) (tomlHeader,
 // splitTOMLKey splits a dotted TOML key into unquoted segments, honoring quoted
 // segments that may themselves contain dots.
 func splitTOMLKey(s string) ([]string, error) {
-	var parts []string
-	var cur []byte
-	b := []byte(s)
-	for i := 0; i < len(b); {
-		c := b[i]
-		switch c {
-		case '"', '\'':
-			j := skipTOMLString(b, i)
-			cur = append(cur, unquoteTOMLKey(b[i:j])...)
-			i = j
-		case '.':
-			parts = append(parts, strings.TrimSpace(string(cur)))
-			cur = nil
-			i++
-		default:
-			cur = append(cur, c)
-			i++
-		}
+	const marker = "__sting_table_path_marker__"
+	var doc map[string]any
+	fixture := []byte("[" + s + "]\n" + marker + " = true\n")
+	if err := toml.Unmarshal(fixture, &doc); err != nil {
+		return nil, err
 	}
-	parts = append(parts, strings.TrimSpace(string(cur)))
-	for _, p := range parts {
-		if p == "" {
-			return nil, errors.New("empty key segment in table header")
-		}
+	path, ok := tomlMarkerPath(doc, marker)
+	if !ok || len(path) == 0 {
+		return nil, errors.New("could not decode table header key")
 	}
-	return parts, nil
+	return path, nil
 }
 
-// unquoteTOMLKey strips the quotes from a quoted key segment, unescaping the
-// common sequences in a basic (double-quoted) key.
-func unquoteTOMLKey(b []byte) string {
-	if len(b) < 2 || b[0] != b[len(b)-1] {
-		return string(b)
+// tomlMarkerPath returns the decoded table path containing marker. The
+// synthetic document used by splitTOMLKey has exactly one such path; walking
+// the semantic map lets go-toml own quoted whitespace, dots, Unicode escapes,
+// and every other key-decoding rule.
+func tomlMarkerPath(table map[string]any, marker string) ([]string, bool) {
+	if value, ok := table[marker]; ok {
+		if flag, valid := value.(bool); valid && flag {
+			return nil, true
+		}
 	}
-	inner := string(b[1 : len(b)-1])
-	if b[0] == '"' {
-		inner = strings.ReplaceAll(inner, `\"`, `"`)
-		inner = strings.ReplaceAll(inner, `\\`, `\`)
+	for key, value := range table {
+		child, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if tail, found := tomlMarkerPath(child, marker); found {
+			return append([]string{key}, tail...), true
+		}
 	}
-	return inner
+	return nil, false
 }
 
 // skipTOMLString advances past the TOML string beginning at raw[i] (a quote
