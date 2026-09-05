@@ -69,8 +69,10 @@ type Query struct {
 	// matched with the author-email: qualifier and a login with author:. For
 	// GitLab this is matched against the commit author string.
 	Author string
-	// Since and Until bound the commit author date, inclusive. A zero Until
-	// means "now".
+	// Since and Until are inclusive window bounds. GitHub search and PR
+	// discovery use author date; repository/org listings use committer date.
+	// Provider filtering is preserved, not emulated by post-filtering an
+	// already time-limited listing. A zero Until means "now".
 	Since time.Time
 	Until time.Time
 	// Scope selects the discovery strategy.
@@ -116,8 +118,14 @@ type Commit struct {
 	AuthorName string    `json:"author_name"`      // git author name
 	Email      string    `json:"email,omitempty"`  // git author email
 	Date       time.Time `json:"date"`             // git author date
-	Message    string    `json:"message"`          // full commit message
-	URL        string    `json:"url"`              // html_url
+	// CommitterDate preserves the GitHub committer timestamp when supplied.
+	// Date remains the author timestamp for compatibility.
+	CommitterDate time.Time `json:"committer_date,omitzero"`
+	// WindowDateBasis states which timestamp selected this commit. Omitted
+	// when a provider path does not report a verified basis.
+	WindowDateBasis string `json:"window_date_basis,omitempty"`
+	Message         string `json:"message"` // full commit message
+	URL             string `json:"url"`     // html_url
 	// Source records how the commit was discovered so a match is auditable:
 	// "search" (commit search index), "repo" (default-branch listing), or
 	// "pull/<n>" (open pull-request branch). Empty for provider paths that do
@@ -160,8 +168,12 @@ type Result struct {
 	Scope         Scope     `json:"scope"`
 	Since         time.Time `json:"since"`
 	Until         time.Time `json:"until"`
-	Count         int       `json:"count"`
-	Commits       []Commit  `json:"commits"`
+	// WindowDateBasis is author, committer, or mixed for GitHub discovery.
+	// Mixed means repo listings use committer date and open-PR discovery uses
+	// author date; each commit records its own basis. Empty means unspecified.
+	WindowDateBasis string   `json:"window_date_basis,omitempty"`
+	Count           int      `json:"count"`
+	Commits         []Commit `json:"commits"`
 	// Truncated is true when a cap or later-stage failure made the evidence
 	// incomplete.
 	Truncated bool `json:"truncated,omitempty"`

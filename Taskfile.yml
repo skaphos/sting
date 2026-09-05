@@ -57,6 +57,11 @@ tasks:
     cmds:
       - go test -race ./...
 
+  test-integration:
+    desc: Exercise the built CLI and MCP stdio server against local provider fixtures
+    cmds:
+      - go test -race -count=1 ./integration
+
   test-cover:
     desc: Run tests with coverage output
     cmds:
@@ -126,6 +131,7 @@ tasks:
     deps:
       - lint
       - test
+      - test-integration
       - staticcheck
       - vuln
       - build-ci

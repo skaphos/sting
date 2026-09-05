@@ -63,6 +63,13 @@ func toMarkdown(r model.Result) string {
 	fmt.Fprintf(&b, "- **Window:** %s → %s\n",
 		r.Since.UTC().Format("2006-01-02"), r.Until.UTC().Format("2006-01-02"))
 	fmt.Fprintf(&b, "- **Scope:** %s\n", r.Scope)
+	if r.WindowDateBasis != "" {
+		fmt.Fprintf(&b, "- **Window date basis:** %s", r.WindowDateBasis)
+		if r.WindowDateBasis == model.WindowDateBasisMixed {
+			b.WriteString(" (repository listing: committer; open PRs: author)")
+		}
+		b.WriteString(". Commit dates below are author dates.\n")
+	}
 	fmt.Fprintf(&b, "- **Commits:** %d", r.Count)
 	if r.Truncated {
 		b.WriteString(" _(truncated)_")
@@ -105,6 +112,12 @@ func toMarkdown(r model.Result) string {
 			}
 			fmt.Fprintf(&b, "- %s %s — %s",
 				codeSpan(sha), c.Date.UTC().Format("2006-01-02"), c.Summary())
+			if !c.CommitterDate.IsZero() && !c.CommitterDate.Equal(c.Date) {
+				fmt.Fprintf(&b, " [committed: %s]", c.CommitterDate.UTC().Format("2006-01-02T15:04:05Z"))
+			}
+			if c.WindowDateBasis != "" {
+				fmt.Fprintf(&b, " [window: %s date]", c.WindowDateBasis)
+			}
 			// Flag commits discovered on an open PR branch: they are unmerged
 			// evidence, so the source matters for an auditor reading the report.
 			if strings.HasPrefix(c.Source, "pull/") {

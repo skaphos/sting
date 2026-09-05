@@ -69,38 +69,9 @@ func (cfg Config) ResolveActivity(req ActivityRequest, now time.Time) (model.Act
 		return model.ActivityQuery{}, fmt.Errorf("invalid github repo %q: must be owner/name with no spaces or qualifier characters", req.Repo)
 	}
 
-	until := now
-	if req.Until != "" {
-		t, err := ParseTime(req.Until)
-		if err != nil {
-			return model.ActivityQuery{}, fmt.Errorf("until: %w", err)
-		}
-		until = t
-	}
-
-	var since time.Time
-	switch {
-	case req.Since != "":
-		t, err := ParseTime(req.Since)
-		if err != nil {
-			return model.ActivityQuery{}, fmt.Errorf("since: %w", err)
-		}
-		since = t
-	default:
-		window := req.Window
-		if window == "" {
-			window = cfg.DefaultWindow
-		}
-		d, err := ParseWindow(window)
-		if err != nil {
-			return model.ActivityQuery{}, fmt.Errorf("window: %w", err)
-		}
-		since = until.Add(-d)
-	}
-
-	if since.After(until) {
-		return model.ActivityQuery{}, fmt.Errorf("since (%s) is after until (%s)",
-			since.Format(time.RFC3339), until.Format(time.RFC3339))
+	since, until, err := resolveWindow(req.Since, req.Until, req.Window, cfg.DefaultWindow, now)
+	if err != nil {
+		return model.ActivityQuery{}, err
 	}
 
 	includeDiffs := cfg.IncludeDiffs
@@ -142,8 +113,8 @@ func (cfg Config) ResolveActivity(req ActivityRequest, now time.Time) (model.Act
 		Provider:      provider,
 		Repo:          repo,
 		Ref:           strings.TrimSpace(req.Ref),
-		Since:         since.UTC(),
-		Until:         until.UTC(),
+		Since:         since,
+		Until:         until,
 		Author:        strings.TrimSpace(req.Author),
 		IncludeDiffs:  includeDiffs,
 		MaxDiffBytes:  maxDiffBytes,
