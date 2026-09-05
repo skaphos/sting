@@ -19,13 +19,15 @@ const ActivitySchemaVersion = "sting.activity.skaphos.io/v1"
 // determinism the evidence contract depends on.
 const DefaultMaxRequests = 500
 
-// Window date basis values for ActivityResult.WindowDateBasis. GitHub's
+// Window date basis values for commit-query and activity evidence. GitHub's
 // list-commits since/until filter on the committer date, which diverges from
 // the author date after a rebase, cherry-pick, or amend; the result states
 // which date bounded the window rather than leaving it implicit.
 const (
 	WindowDateBasisCommitter = "committer"
 	WindowDateBasisAuthor    = "author"
+	// WindowDateBasisMixed describes queries combining discovery date bases.
+	WindowDateBasisMixed = "mixed"
 )
 
 // Base sources for Boundaries.BaseSource.
@@ -81,6 +83,10 @@ const (
 	DisclosureBudgetBounded = "budget-bounded"
 	// DisclosureCollectionFailed: a provider or cancellation error stopped gathering.
 	DisclosureCollectionFailed = "collection-failed"
+	// DisclosureSearchIncomplete: GitHub could not guarantee a complete search.
+	DisclosureSearchIncomplete = "search-incomplete"
+	// DisclosureSearchCapped: the search exceeds GitHub's 1,000-result bound.
+	DisclosureSearchCapped = "search-capped"
 	// DisclosureQuotaExhausted: the provider rate limit stopped the query.
 	DisclosureQuotaExhausted = "quota-exhausted"
 	// DisclosureProviderCapped: the comparison hit the provider's file cap.

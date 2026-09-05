@@ -227,13 +227,14 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 
 	var (
-		commits []model.Commit
-		skipped []model.SkippedRepo
-		err     error
+		commits     []model.Commit
+		skipped     []model.SkippedRepo
+		disclosures []model.Disclosure
+		err         error
 	)
 	switch q.Scope {
 	case model.ScopeSearch:
-		commits, err = c.searchByAuthor(ctx, eq)
+		commits, disclosures, err = c.searchByAuthor(ctx, eq)
 	case model.ScopeRepos:
 		commits, err = c.listRepos(ctx, eq)
 	case model.ScopeOrg:
@@ -242,7 +243,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		return model.Result{}, fmt.Errorf("unsupported scope %q", q.Scope)
 	}
 
-	truncated := false
+	truncated := len(disclosures) > 0
 	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
@@ -256,18 +257,20 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	if err != nil {
 		truncated = true
 		res := model.Result{
-			SchemaVersion: model.SchemaVersion,
-			GeneratedAt:   time.Now(),
-			Provider:      model.ProviderGitHub,
-			Author:        q.Author,
-			Scope:         q.Scope,
-			Since:         q.Since,
-			Until:         q.Until,
-			Count:         len(commits),
-			Commits:       commits,
-			Truncated:     truncated,
-			Cost:          c.Cost(),
-			Skipped:       skipped,
+			SchemaVersion:   model.SchemaVersion,
+			GeneratedAt:     time.Now(),
+			Provider:        model.ProviderGitHub,
+			Author:          q.Author,
+			Scope:           q.Scope,
+			Since:           q.Since,
+			Until:           q.Until,
+			WindowDateBasis: queryDateBasis(q),
+			Count:           len(commits),
+			Commits:         commits,
+			Truncated:       truncated,
+			Cost:            c.Cost(),
+			Skipped:         skipped,
+			Disclosures:     disclosures,
 		}
 		if errors.Is(err, apibudget.ErrBudgetExceeded) {
 			res.Disclosures = append(res.Disclosures,
@@ -297,18 +300,20 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	}
 
 	res := model.Result{
-		SchemaVersion: model.SchemaVersion,
-		GeneratedAt:   time.Now(),
-		Provider:      model.ProviderGitHub,
-		Author:        q.Author,
-		Scope:         q.Scope,
-		Since:         q.Since,
-		Until:         q.Until,
-		Count:         len(commits),
-		Commits:       commits,
-		Truncated:     truncated,
-		Cost:          c.Cost(),
-		Skipped:       skipped,
+		SchemaVersion:   model.SchemaVersion,
+		GeneratedAt:     time.Now(),
+		Provider:        model.ProviderGitHub,
+		Author:          q.Author,
+		Scope:           q.Scope,
+		Since:           q.Since,
+		Until:           q.Until,
+		WindowDateBasis: queryDateBasis(q),
+		Count:           len(commits),
+		Commits:         commits,
+		Truncated:       truncated,
+		Cost:            c.Cost(),
+		Skipped:         skipped,
+		Disclosures:     disclosures,
 	}
 	if errors.Is(enrichErr, apibudget.ErrBudgetExceeded) {
 		res.Disclosures = append(res.Disclosures,
@@ -319,7 +324,12 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 }
 
 // searchByAuthor uses GitHub's global commit search index.
-func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Commit, error) {
+func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Commit, []model.Disclosure, error) {
+	const searchResultCap = 1000
+	limit := searchResultCap
+	if q.MaxCommits > 0 {
+		limit = min(limit, q.MaxCommits)
+	}
 	query := buildSearchQuery(q)
 	opts := &github.SearchOptions{
 		Sort:        "author-date",
@@ -327,32 +337,63 @@ func (c *Client) searchByAuthor(ctx context.Context, q model.Query) ([]model.Com
 		ListOptions: github.ListOptions{PerPage: c.resultPageSize(q.MaxCommits)},
 	}
 	var out []model.Commit
+	var disclosures []model.Disclosure
+	incomplete, capped := false, false
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return out, fmt.Errorf("search commits: exceeded max pages (%d)", maxPages)
+			return out, disclosures, fmt.Errorf("search commits: exceeded max pages (%d)", maxPages)
 		}
 		res, resp, err := c.gh.Search.Commits(ctx, query, opts)
 		if err != nil {
 			// Return the pages already gathered: a stop partway through
 			// discovery still produced real evidence, and discarding it is the
 			// blindness Constitution VI forbids.
-			return out, apiError("search commits", err)
+			return out, disclosures, apiError("search commits", err)
+		}
+		// Every page can report a timeout independently, including an empty
+		// page. Keep returned commits and continue, but never claim completeness.
+		if res.GetIncompleteResults() && !incomplete {
+			incomplete = true
+			disclosures = append(disclosures, model.Disclosure{
+				Kind:       model.DisclosureSearchIncomplete,
+				Reason:     "GitHub reported incomplete_results: search timed out and may have omitted matching commits.",
+				NextAction: "Retry with a narrower window or use repos/org scope.",
+			})
+		}
+		nextBeyondCap := resp != nil && resp.NextPage > 0 && (resp.NextPage-1)*opts.PerPage >= searchResultCap
+		if !capped && (res.GetTotal() > searchResultCap || nextBeyondCap) {
+			capped = true
+			disclosures = append(disclosures, model.Disclosure{
+				Kind:       model.DisclosureSearchCapped,
+				Reason:     "GitHub search exposes at most 1,000 matching commits; this search exceeds that bound.",
+				NextAction: "Split the window or use repos/org scope to gather the remaining evidence.",
+			})
 		}
 		for _, cr := range res.Commits {
 			out = append(out, fromSearchResult(cr))
-			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+			if len(out) >= limit {
 				break
 			}
 		}
-		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
+		if len(out) >= limit {
 			break
 		}
-		if resp.NextPage == 0 {
+		if resp == nil || resp.NextPage == 0 || nextBeyondCap {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
-	return out, nil
+	return out, disclosures, nil
+}
+
+func queryDateBasis(q model.Query) string {
+	if q.Scope == model.ScopeSearch {
+		return model.WindowDateBasisAuthor
+	}
+	if q.IncludePullRequests {
+		return model.WindowDateBasisMixed
+	}
+	return model.WindowDateBasisCommitter
 }
 
 // listRepos lists commits authored by q.Author across each "owner/repo" target.
@@ -566,6 +607,7 @@ func (c *Client) prBranchCommits(ctx context.Context, owner, repo string, number
 		for _, rc := range commits {
 			cm := fromRepoCommit(full, rc)
 			cm.Source = source
+			cm.WindowDateBasis = model.WindowDateBasisAuthor
 			if !authorMatches(cm, q.Author) || !inWindow(cm.Date, q.Since, q.Until) {
 				continue
 			}
@@ -784,10 +826,9 @@ func safeQualifierValue(v string) bool {
 func buildSearchQuery(q model.Query) string {
 	parts := []string{authorQualifier(q.Author)}
 	if !q.Since.IsZero() || !q.Until.IsZero() {
-		// Emit full RFC3339 timestamps rather than whole-day dates so the search
-		// scope filters at the same second precision as the repos, PR, and GitLab
-		// paths; otherwise the same window returns materially different evidence
-		// under scope=search vs scope=repos.
+		// Preserve second precision rather than widening the query to whole
+		// days. This remains an author-date filter, unlike the committer-date
+		// filter used by repository listings.
 		since := "*"
 		if !q.Since.IsZero() {
 			since = q.Since.UTC().Format(time.RFC3339)
@@ -814,47 +855,53 @@ func buildSearchQuery(q model.Query) string {
 
 func fromSearchResult(cr *github.CommitResult) model.Commit {
 	cm := model.Commit{
-		SHA:     cr.GetSHA(),
-		URL:     cr.GetHTMLURL(),
-		Author:  cr.GetAuthor().GetLogin(),
-		Repo:    cr.GetRepository().GetFullName(),
-		Message: cr.GetCommit().GetMessage(),
-		Source:  "search",
+		SHA:             cr.GetSHA(),
+		URL:             cr.GetHTMLURL(),
+		Author:          cr.GetAuthor().GetLogin(),
+		Repo:            cr.GetRepository().GetFullName(),
+		Message:         cr.GetCommit().GetMessage(),
+		Source:          "search",
+		WindowDateBasis: model.WindowDateBasisAuthor,
 	}
 	if a := cr.GetCommit().GetAuthor(); a != nil {
 		cm.AuthorName = a.GetName()
 		cm.Email = a.GetEmail()
 		cm.Date = a.GetDate().Time
 	}
+	if committer := cr.GetCommit().GetCommitter(); committer != nil {
+		cm.CommitterDate = committer.GetDate().Time
+	}
 	return cm
 }
 
 func fromRepoCommit(repoFull string, rc *github.RepositoryCommit) model.Commit {
 	cm := model.Commit{
-		SHA:     rc.GetSHA(),
-		URL:     rc.GetHTMLURL(),
-		Author:  rc.GetAuthor().GetLogin(),
-		Repo:    repoFull,
-		Message: rc.GetCommit().GetMessage(),
-		Source:  "repo",
+		SHA:             rc.GetSHA(),
+		URL:             rc.GetHTMLURL(),
+		Author:          rc.GetAuthor().GetLogin(),
+		Repo:            repoFull,
+		Message:         rc.GetCommit().GetMessage(),
+		Source:          "repo",
+		WindowDateBasis: model.WindowDateBasisCommitter,
 	}
 	if a := rc.GetCommit().GetAuthor(); a != nil {
 		cm.AuthorName = a.GetName()
 		cm.Email = a.GetEmail()
 		cm.Date = a.GetDate().Time
 	}
+	if committer := rc.GetCommit().GetCommitter(); committer != nil {
+		cm.CommitterDate = committer.GetDate().Time
+	}
 	return cm
 }
 
 // fromRepoActivityCommit converts a list-commits entry into an ActivityCommit,
-// capturing the two things fromRepoCommit necessarily discards: the parent SHAs
-// and the committer date.
+// additionally capturing the parent SHAs needed for boundary resolution.
 //
 // Both are already present in the *list* response — GitHub populates Parents
 // there, not only on commit detail (research R1) — which is what makes boundary
-// resolution cost zero extra requests. model.Commit cannot carry them because it
-// is pinned by model.SchemaVersion, so the activity path gets its own type
-// rather than the shared one gaining fields.
+// resolution cost zero extra requests. Activity retains its separate contract
+// for boundaries and correlations.
 func fromRepoActivityCommit(repoFull string, rc *github.RepositoryCommit) model.ActivityCommit {
 	cm := model.ActivityCommit{
 		SHA:     rc.GetSHA(),

@@ -56,7 +56,8 @@ type Request struct {
 }
 
 // Resolve turns a Request into a validated model.Query, applying defaults from
-// cfg. The reference time now is injected for testability.
+// cfg and normalizing the window to UTC. The reference time now is injected
+// for testability.
 func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 	if req.Author == "" {
 		return model.Query{}, fmt.Errorf("author is required")
@@ -84,38 +85,9 @@ func (cfg Config) Resolve(req Request, now time.Time) (model.Query, error) {
 		return model.Query{}, fmt.Errorf("provider %q does not support scope %q (use repos or org)", provider, scope)
 	}
 
-	until := now
-	if req.Until != "" {
-		t, err := ParseTime(req.Until)
-		if err != nil {
-			return model.Query{}, fmt.Errorf("until: %w", err)
-		}
-		until = t
-	}
-
-	var since time.Time
-	switch {
-	case req.Since != "":
-		t, err := ParseTime(req.Since)
-		if err != nil {
-			return model.Query{}, fmt.Errorf("since: %w", err)
-		}
-		since = t
-	default:
-		window := req.Window
-		if window == "" {
-			window = cfg.DefaultWindow
-		}
-		d, err := ParseWindow(window)
-		if err != nil {
-			return model.Query{}, fmt.Errorf("window: %w", err)
-		}
-		since = until.Add(-d)
-	}
-
-	if since.After(until) {
-		return model.Query{}, fmt.Errorf("since (%s) is after until (%s)",
-			since.Format(time.RFC3339), until.Format(time.RFC3339))
+	since, until, err := resolveWindow(req.Since, req.Until, req.Window, cfg.DefaultWindow, now)
+	if err != nil {
+		return model.Query{}, err
 	}
 
 	repos := req.Repos

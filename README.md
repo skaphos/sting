@@ -357,6 +357,33 @@ callers must explicitly pass `include_diffs: true` to request patch text.
 
 ### Scopes
 
+Query windows are normalized to UTC by both the commit and activity resolvers.
+Explicit `--since` overrides `--window`; an omitted `--until` uses the request
+time. Equivalent RFC3339 offsets represent the same window.
+
+GitHub discovery paths use different date bases:
+
+| Discovery path | Window filter |
+| --- | --- |
+| Commit search | Author date (`author-date:`) |
+| Repository/org default-branch listing | Committer date (`since`/`until`) |
+| Open-PR augmentation | Author date (filtered locally) |
+
+GitHub results expose `window_date_basis` as `author`, `committer`, or `mixed`
+(repository/org queries with PR augmentation enabled). Each returned commit
+also names its own basis. `date` remains the author timestamp; the additive
+`committer_date` preserves the committer timestamp when supplied. The existing
+schema version is retained because these fields are additive, not a replacement
+for `date` (see [ADR 0004](docs/adr/0004-public-packages-and-wake-evidence.md)).
+An omitted basis means unspecified, not author date.
+
+After rebasing or cherry-picking, a repository query can return a commit whose
+author date is outside the window but whose committer date is inside it. Search
+can select the opposite case. Sting preserves these provider semantics; filtering
+an already time-limited repository listing by author date would not recover
+commits omitted by the provider. See the
+[recorded provider verification](specs/001-repo-activity-digest/research.md#r2--window-filtering-is-committer-date-based-upstream-sting-reports-author-date).
+
 | provider | scope    | how it finds commits                                             | notes                                               |
 |----------|----------|------------------------------------------------------------------|-----------------------------------------------------|
 | GitHub   | `search` | GitHub commit search by `author:` (or `author-email:` for emails) | global (public-only) unless scoped; 1000-result cap |
@@ -368,6 +395,14 @@ callers must explicitly pass `include_diffs: true` to request patch text.
 GitLab `search` scope is not supported yet. GitLab's search API does not map
 cleanly to sting's date-bounded author query contract, so use `repos` or `org`
 with `--provider gitlab`.
+
+GitHub search can return HTTP success while reporting `incomplete_results`.
+Sting checks every page, retains returned commits, and marks the result
+`truncated` with a `search-incomplete` disclosure. Searches exceeding the
+1,000-result bound carry `search-capped`; sting does not request pages beyond
+that bound. These limits also apply to empty responses. Narrow the window,
+retry, or use repository/org scope to gather additional evidence. See
+[GitHub search limits and timeouts](https://docs.github.com/en/rest/search/search#timeouts-and-incomplete-results).
 
 In `org` scope sting enumerates the org's repos and then lists each repo's
 commits. A repo that cannot be listed for a reason specific to that repo — an
