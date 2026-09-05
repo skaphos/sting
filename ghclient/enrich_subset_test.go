@@ -168,13 +168,12 @@ func TestEnrichmentSubsetIsTheFirstNInOrder(t *testing.T) {
 }
 
 // TestEnrichmentChecksBudgetBeforeDispatch is the other half of R3: when
-// capacity is short the batch is trimmed to what can be afforded, rather than
-// firing requests and letting the losers fail. Fire-and-fail would make *which*
-// commits got enriched depend on which requests won the race.
+// capacity is short, enrichment stops in commit order before dispatching an
+// unaffordable request. No workers race to select the retained evidence.
 func TestEnrichmentChecksBudgetBeforeDispatch(t *testing.T) {
 	const commits = 50
 	tr := newCountingTransport(commits, 100)
-	// 1 pre-flight + 1 listing page + 1 comparison leaves very little for
+	// 1 listing page + 1 comparison leaves very little for
 	// enrichment, so the subset must be trimmed rather than attempted in full.
 	c := budgetedClientWithTransport(t, tr, 100, 6)
 
@@ -191,8 +190,7 @@ func TestEnrichmentChecksBudgetBeforeDispatch(t *testing.T) {
 	if res.Cost.Consumed > 6 {
 		t.Errorf("Consumed = %d, exceeded the ceiling of 6", res.Cost.Consumed)
 	}
-	// The change set must still have been produced: enrichment reserves
-	// capacity for the comparison rather than starving it.
+	// The change set must still have been produced before optional enrichment.
 	if byKind["compare"] != 1 {
 		t.Errorf("comparison requests = %d, want 1 — enrichment starved the change set",
 			byKind["compare"])
@@ -213,8 +211,8 @@ func TestEnrichmentChecksBudgetBeforeDispatch(t *testing.T) {
 	}
 }
 
-// TestEnrichmentRequestCountMatchesSubset: enrichment costs exactly one request
-// per commit, so the documented price is the real one.
+// TestEnrichmentRequestCountMatchesSubset: when file details fit on one page,
+// enrichment costs one request per commit. Paginated details cost more.
 func TestEnrichmentRequestCountMatchesSubset(t *testing.T) {
 	const subset = 7
 	tr := newCountingTransport(40, 100)

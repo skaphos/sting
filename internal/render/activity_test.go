@@ -15,14 +15,16 @@ func sampleActivity() model.ActivityResult {
 	since := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
 	return model.ActivityResult{
-		SchemaVersion:   model.ActivitySchemaVersion,
-		GeneratedAt:     until,
-		Provider:        model.ProviderGitHub,
-		Repo:            "skaphos/sting",
-		Ref:             "main",
-		Since:           since,
-		Until:           until,
-		WindowDateBasis: model.WindowDateBasisCommitter,
+		CommitsCollected:   true,
+		ChangeSetCollected: true,
+		SchemaVersion:      model.ActivitySchemaVersion,
+		GeneratedAt:        until,
+		Provider:           model.ProviderGitHub,
+		Repo:               "skaphos/sting",
+		Ref:                "main",
+		Since:              since,
+		Until:              until,
+		WindowDateBasis:    model.WindowDateBasisCommitter,
 		Boundaries: model.Boundaries{
 			BaseSHA:    "1ce380ecafe0000",
 			HeadSHA:    "1ae89e4beef1111",

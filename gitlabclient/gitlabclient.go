@@ -597,9 +597,14 @@ func diffStatus(gd gitlabDiff) string {
 }
 
 func countPatchLines(patch string) (additions, deletions int) {
+	inHunk := false
 	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+		case strings.HasPrefix(line, "diff --git "):
+			inHunk = false
+		case strings.HasPrefix(line, "@@ "):
+			inHunk = true
+		case !inHunk && (strings.HasPrefix(line, "+++ ") || strings.HasPrefix(line, "--- ")):
 			continue
 		case strings.HasPrefix(line, "+"):
 			additions++

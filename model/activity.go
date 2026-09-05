@@ -79,6 +79,8 @@ const (
 const (
 	// DisclosureBudgetBounded: the request ceiling stopped the query.
 	DisclosureBudgetBounded = "budget-bounded"
+	// DisclosureCollectionFailed: a provider or cancellation error stopped gathering.
+	DisclosureCollectionFailed = "collection-failed"
 	// DisclosureQuotaExhausted: the provider rate limit stopped the query.
 	DisclosureQuotaExhausted = "quota-exhausted"
 	// DisclosureProviderCapped: the comparison hit the provider's file cap.
@@ -125,7 +127,7 @@ type ActivityQuery struct {
 	// MaxDiffBytes caps patch text; 0 uses DefaultMaxDiffBytes.
 	MaxDiffBytes int
 	// EnrichCommits is the size of the opt-in per-commit detail subset. It
-	// costs one request per commit and is what enables observed (rather than
+	// costs at least one request per commit and is what enables observed (rather than
 	// inferred) path attribution. 0 disables enrichment.
 	EnrichCommits int
 	// MaxRequests caps the provider requests this query may consume. 0
@@ -158,6 +160,11 @@ type ActivityResult struct {
 	Commits         []ActivityCommit `json:"commits"`
 	ChangeSet       ChangeSet        `json:"change_set"`
 	Correlations    []Correlation    `json:"correlations,omitempty"`
+	// Completion flags distinguish observed absence from evidence not gathered.
+	// ChangeSetCollected can be true with Truncated paths; disclosures still apply.
+	CommitsCollected   bool `json:"commits_collected"`
+	ChangeSetCollected bool `json:"change_set_collected"`
+	EstimateOnly       bool `json:"estimate_only"`
 	// Cost is always populated, including on every early-return path: a query
 	// that stopped early must still report what it spent.
 	Cost CostReport `json:"cost"`
@@ -207,10 +214,11 @@ type ActivityCommit struct {
 	// ParentSHAs lists the commit's parents; the first element is the first
 	// parent, which is what boundary resolution follows.
 	ParentSHAs []string `json:"parent_shas,omitempty"`
-	// Enriched is true only when per-commit detail was actually fetched. It is
+	// Enriched is true only when all per-commit file pages were fetched. It is
 	// the precondition for any observed correlation naming this commit.
 	Enriched bool `json:"enriched,omitempty"`
-	// Files is populated only when Enriched.
+	// Files retains fetched pages even when enrichment stops early. When
+	// Enriched is false this list is incomplete and cannot prove path absence.
 	Files []File `json:"files,omitempty"`
 }
 

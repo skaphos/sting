@@ -13,7 +13,6 @@ import (
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
-	"golang.org/x/sync/errgroup"
 )
 
 // providerFileCap is the number of files GitHub returns from a comparison
@@ -25,18 +24,40 @@ const providerFileCap = 300
 // the aggregate change set between the window's boundary states, the
 // correlations between them, and what the whole thing cost.
 //
-// It returns a populated ActivityResult on every non-fatal path — budget stops,
-// quota exhaustion, and ancestry divergence all produce a result plus a
-// disclosure. The error return is reserved for failures that occur before
-// evidence gathering begins, because discarding gathered evidence to report a
-// bound is the blindness Constitution VI forbids.
-func (c *Client) CollectActivity(ctx context.Context, q model.ActivityQuery) (model.ActivityResult, error) {
+// Budget and quota stops return evidence plus a disclosure, without an error.
+// Other failures return the evidence gathered so far alongside the error.
+func (c *Client) CollectActivity(ctx context.Context, q model.ActivityQuery) (res model.ActivityResult, err error) {
 	owner, repo, ok := splitRepo(q.Repo)
 	if !ok {
 		return model.ActivityResult{}, fmt.Errorf("invalid repo %q (want owner/name)", q.Repo)
 	}
 
-	res := c.newActivityResult(q)
+	res = c.newActivityResult(q)
+	defer func() {
+		estimated, resetsAt := res.Cost.Estimated, res.Cost.QuotaResetsAt
+		res.Cost = c.Cost()
+		res.Cost.Estimated = estimated
+		if !resetsAt.IsZero() {
+			res.Cost.QuotaResetsAt = resetsAt
+		}
+		res.Disclosures = append(res.Disclosures, activity.Build(activity.DisclosureInput{
+			Ref: res.Ref, AuthorFilter: q.Author,
+			RootCommitBase:    res.Boundaries.BaseSource == model.BaseSourceRepositoryRoot,
+			ChangeSetProduced: res.ChangeSetCollected,
+			Diverged:          res.Boundaries.Status == model.StatusDiverged,
+			ProviderCapped:    res.ChangeSet.Truncated,
+			PatchTruncated:    anyPatchTruncated(res.ChangeSet),
+		})...)
+		if stop, d := c.classifyStop(err); stop {
+			res.Disclosures = append(res.Disclosures, d)
+			err = nil
+		} else if err != nil {
+			res.Disclosures = append(res.Disclosures, model.Disclosure{
+				Kind: model.DisclosureCollectionFailed, Reason: err.Error(),
+				NextAction: "Retry the query; the evidence shown is incomplete.",
+			})
+		}
+	}()
 
 	// A quota that is already exhausted means no evidence can be gathered at
 	// all. Reporting that up front — from an endpoint that costs nothing —
@@ -56,16 +77,8 @@ func (c *Client) CollectActivity(ctx context.Context, q model.ActivityQuery) (mo
 
 	// Estimate-only stops here: report the projected cost and gather nothing.
 	if q.EstimateOnly {
-		report, err := c.EstimateActivity(ctx, q)
-		res.Cost = report
-		if err != nil {
-			if stop, d := c.classifyStop(err); stop {
-				res.Disclosures = append(res.Disclosures, d)
-				return res, nil
-			}
-			return model.ActivityResult{}, err
-		}
-		return res, nil
+		res.Cost, err = c.EstimateActivity(ctx, q)
+		return res, err
 	}
 
 	// Resolve the reference before anything else so the result can name what it
@@ -73,114 +86,73 @@ func (c *Client) CollectActivity(ctx context.Context, q model.ActivityQuery) (mo
 	// and echoing "" back would leave the reader unable to re-derive the query.
 	ref, err := c.resolveRef(ctx, owner, repo, q.Ref)
 	if err != nil {
-		// A budget or quota stop here is still a result: nothing was gathered,
-		// but the cost report and the reason are worth returning.
-		if stop, d := c.classifyStop(err); stop {
-			res.Ref = q.Ref
-			res.Disclosures = append(res.Disclosures, d)
-			res.Cost = c.Cost()
-			return res, nil
-		}
-		return model.ActivityResult{}, err
+		return res, err
 	}
 	res.Ref = ref
 
-	commits, listErr := c.listWindowCommits(ctx, owner, repo, q, ref)
-	stopped, stopDisclosure := c.classifyStop(listErr)
-	if listErr != nil && !stopped {
-		return model.ActivityResult{}, listErr
+	// Boundary evidence must cover the whole reference window. Use a separate
+	// provider-filtered listing for authors so GitHub's login/email matching
+	// semantics are preserved, including authors not linked to a GitHub account.
+	windowQuery := q
+	windowQuery.Author = ""
+	commits, listErr := c.listWindowCommits(ctx, owner, repo, windowQuery, ref)
+	if q.Author == "" {
+		res.Commits, res.Count = commits, len(commits)
+		res.CommitsCollected = listErr == nil
 	}
-
-	res.Commits = commits
-	res.Count = len(commits)
+	if listErr != nil {
+		return res, listErr
+	}
 	res.Boundaries = resolveBoundaries(commits)
-
-	var (
-		disclosureInput = activity.DisclosureInput{
-			Ref:            ref,
-			AuthorFilter:   q.Author,
-			RootCommitBase: res.Boundaries.BaseSource == model.BaseSourceRepositoryRoot,
-		}
-		changeSetErr error
-	)
-
-	// Enrich before comparing so that a budget stop during enrichment still
-	// leaves capacity reserved for the change set, and so correlations can use
-	// whatever observation was actually obtained.
-	if !stopped && len(commits) > 0 && q.EnrichCommits > 0 {
-		delivered, enrichErr := c.enrichActivityCommits(ctx, res.Commits, q)
-		if enrichErr != nil {
-			if s, d := c.classifyStop(enrichErr); s {
-				stopped, stopDisclosure = true, d
-			} else {
-				return model.ActivityResult{}, enrichErr
-			}
-		}
-		if requested := min(q.EnrichCommits, len(commits)); delivered < requested {
-			res.Disclosures = append(res.Disclosures, activity.EnrichmentPartial(delivered, requested))
+	if q.Author != "" {
+		res.Commits, listErr = c.listWindowCommits(ctx, owner, repo, q, ref)
+		res.Count = len(res.Commits)
+		res.CommitsCollected = listErr == nil
+		if listErr != nil {
+			return res, listErr
 		}
 	}
 
-	// Only compare when there is something to compare. An empty window is a
-	// legitimate, empty answer rather than an error, and a budget stop during
-	// listing means the boundaries are not trustworthy enough to compare from.
-	if !stopped && len(commits) > 0 {
-		var cs model.ChangeSet
-		var status string
-		earliestSHA := commits[len(commits)-1].SHA
-		cs, status, changeSetErr = c.compareBoundaries(ctx, owner, repo, res.Boundaries, earliestSHA, q)
-		if changeSetErr != nil {
-			if s, d := c.classifyStop(changeSetErr); s {
-				stopped, stopDisclosure = true, d
-			} else {
-				return model.ActivityResult{}, changeSetErr
-			}
-		} else {
-			res.Boundaries.Status = status
-			res.Boundaries.SharedRoot = status != model.StatusDiverged
-			if status == model.StatusDiverged {
-				// Divergence means a net comparison would be meaningless, so
-				// the change set is suppressed rather than rendered as fact.
-				disclosureInput.Diverged = true
-			} else {
-				res.ChangeSet = cs
-				disclosureInput.ChangeSetProduced = true
-				disclosureInput.ProviderCapped = cs.Truncated
-				disclosureInput.PatchTruncated = anyPatchTruncated(cs)
-				// Correlations are derived from what was actually gathered, so
-				// they can only claim observation for commits that really were
-				// enriched.
-				res.Correlations = activity.Correlate(cs.Paths, res.Commits)
-			}
+	// Compare before optional enrichment: detail pagination must never spend
+	// the capacity needed for the repository-wide evidence.
+	if len(commits) == 0 {
+		res.ChangeSetCollected = true
+	} else {
+		cs, status, compareErr := c.compareBoundaries(ctx, owner, repo, res.Boundaries, commits[len(commits)-1].SHA, q)
+		if compareErr != nil {
+			return res, compareErr
+		}
+		res.Boundaries.Status = status
+		res.Boundaries.SharedRoot = status != model.StatusDiverged
+		if status != model.StatusDiverged {
+			res.ChangeSet, res.ChangeSetCollected = cs, true
 		}
 	}
 
-	res.Disclosures = append(res.Disclosures, activity.Build(disclosureInput)...)
-	if stopped {
-		res.Disclosures = append(res.Disclosures, stopDisclosure)
+	delivered, enrichErr := c.enrichActivityCommits(ctx, res.Commits, q)
+	if requested := min(q.EnrichCommits, len(res.Commits)); delivered < requested {
+		res.Disclosures = append(res.Disclosures, activity.EnrichmentPartial(delivered, requested))
 	}
-	res.Cost = c.Cost()
-	return res, nil
+	res.Correlations = activity.Correlate(res.ChangeSet.Paths, res.Commits)
+	return res, enrichErr
 }
 
 // EstimateActivity reports the projected cost of a query without gathering its
 // evidence.
 //
-// It issues exactly one probe: a per_page=1 list-commits request whose Link
-// header yields LastPage, which with a page size of 1 *is* the exact number of
-// commits in the window (research R4). That turns the estimate from a heuristic
-// into arithmetic. The probe itself is counted in the reported cost — hiding it
-// would make the accounting dishonest about its own overhead.
-//
-// The probe gathers no evidence: the single commit it returns is discarded and
-// only the Link header is read.
+// A per_page=1 probe uses LastPage to count the repository window (research R4).
+// Author-filtered queries need a second probe for their separate commit view.
+// Both probes are counted. Detail file-page counts are unknown, so enrichment
+// assumes one page per commit and may cost more than projected.
 func (c *Client) EstimateActivity(ctx context.Context, q model.ActivityQuery) (model.CostReport, error) {
 	owner, repo, ok := splitRepo(q.Repo)
 	if !ok {
 		return c.Cost(), fmt.Errorf("invalid repo %q (want owner/name)", q.Repo)
 	}
 
-	commits, err := c.probeCommitCount(ctx, owner, repo, q)
+	windowQuery := q
+	windowQuery.Author = ""
+	commits, err := c.probeCommitCount(ctx, owner, repo, windowQuery)
 	if err != nil {
 		// Report what the attempt cost even when it failed.
 		return c.Cost(), err
@@ -188,6 +160,16 @@ func (c *Client) EstimateActivity(ctx context.Context, q model.ActivityQuery) (m
 
 	report := c.Cost()
 	report.Estimated = estimateRequests(commits, c.perPage, q)
+	if q.Author != "" {
+		filtered, probeErr := c.probeCommitCount(ctx, owner, repo, q)
+		if probeErr != nil {
+			return c.Cost(), probeErr
+		}
+		report = c.Cost()
+		filteredQuery := q
+		filteredQuery.EnrichCommits = 0
+		report.Estimated = estimateRequests(commits, c.perPage, filteredQuery) + 1 + max(1, (filtered+c.perPage-1)/c.perPage) + min(q.EnrichCommits, filtered)
+	}
 	report.Ceiling = q.MaxRequests
 	return report, nil
 }
@@ -219,9 +201,9 @@ func (c *Client) probeCommitCount(ctx context.Context, owner, repo string, q mod
 //
 //	1 (probe) + ceil(commits/per_page) + 1 (comparison) + enrichment subset
 //
-// plus one reference lookup when the query left the reference implicit. Every
-// term is exact, so the only source of drift is upstream state changing between
-// the estimate and the run.
+// plus one reference lookup when the query left the reference implicit. Empty
+// windows still require a listing but skip comparison. Enrichment assumes one
+// file page per commit; additional file pages are not known until fetched.
 func estimateRequests(commits, perPage int, q model.ActivityQuery) int {
 	if perPage < 1 {
 		perPage = 100
@@ -230,9 +212,9 @@ func estimateRequests(commits, perPage int, q model.ActivityQuery) int {
 	if q.Ref == "" {
 		estimate++ // default-branch lookup
 	}
+	estimate += max(1, (commits+perPage-1)/perPage) // even an empty listing costs one request
 	if commits > 0 {
-		estimate += (commits + perPage - 1) / perPage // listing pages
-		estimate++                                    // one boundary comparison
+		estimate++ // one boundary comparison
 	}
 	enrich := min(q.EnrichCommits, commits)
 	if enrich > 0 {
@@ -287,6 +269,7 @@ func (c *Client) newActivityResult(q model.ActivityQuery) model.ActivityResult {
 		Commits:         []model.ActivityCommit{},
 		ChangeSet:       model.ChangeSet{Paths: []model.ChangedPath{}},
 		Cost:            c.Cost(),
+		EstimateOnly:    q.EstimateOnly,
 	}
 }
 
@@ -472,6 +455,8 @@ func (c *Client) compareBoundaries(ctx context.Context, owner, repo string, b mo
 // including renames, and sorts by path so identical upstream state yields
 // byte-identical output — provider ordering is not guaranteed stable.
 func changeSetFromFiles(files []*github.CommitFile, q model.ActivityQuery) model.ChangeSet {
+	files = append([]*github.CommitFile(nil), files...)
+	sort.SliceStable(files, func(i, j int) bool { return files[i].GetFilename() < files[j].GetFilename() })
 	cs := model.ChangeSet{Paths: make([]model.ChangedPath, 0, len(files))}
 	budget := q.MaxDiffBytes
 	if budget <= 0 {
@@ -494,8 +479,6 @@ func changeSetFromFiles(files []*github.CommitFile, q model.ActivityQuery) model
 		cs.Paths = append(cs.Paths, cp)
 	}
 
-	sort.SliceStable(cs.Paths, func(i, j int) bool { return cs.Paths[i].Path < cs.Paths[j].Path })
-
 	// The provider caps a comparison's file list; hitting the cap exactly is
 	// the only signal available that it was clipped.
 	if len(files) >= providerFileCap {
@@ -508,66 +491,27 @@ func changeSetFromFiles(files []*github.CommitFile, q model.ActivityQuery) model
 // the result's existing order, which is what turns inferred attribution into
 // observed attribution. It returns how many were actually enriched.
 //
-// Two rules keep this deterministic, and both matter (research R3):
-//
-//  1. **Check before dispatch.** The budget is asked how much capacity remains
-//     and only a batch that can be fully afforded is dispatched, rather than
-//     firing requests and letting the losers fail. If the ceiling were enforced
-//     purely inside the transport, *which* requests won the race would decide
-//     which commits got enriched.
-//  2. **Clip by commit order, not completion order.** When capacity is short,
-//     the first n commits in the existing deterministic order are enriched and
-//     the rest are left alone.
-//
-// Without these, the same query against unchanged upstream state could return
-// different results run to run.
+// Fetch in commit order, including every file page. Concurrent paginating
+// workers would race for capacity and make the retained evidence nondeterministic.
 func (c *Client) enrichActivityCommits(ctx context.Context, commits []model.ActivityCommit, q model.ActivityQuery) (int, error) {
 	requested := min(q.EnrichCommits, len(commits))
-	if requested <= 0 {
-		return 0, nil
-	}
-
-	// Reserve capacity for the comparison that still has to happen, so
-	// enrichment cannot starve the change set.
-	const reserveForComparison = 1
-	affordable := c.budgetRemaining() - reserveForComparison
-	if affordable < 0 {
-		affordable = 0
-	}
-	subset := min(requested, affordable)
-	if subset <= 0 {
-		return 0, nil
-	}
-
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(c.concurrency)
-	for i := range subset {
-		cm := &commits[i]
-		g.Go(func() error {
-			owner, repo, ok := splitRepo(cm.Repo)
-			if !ok {
-				return fmt.Errorf("invalid repo %q", cm.Repo)
-			}
-			files, err := c.commitFiles(gctx, owner, repo, cm.SHA, q)
-			if err != nil {
-				return err
-			}
-			cm.Files = files
-			// Enriched is set only after a successful fetch: it is the
-			// precondition for any observed attribution naming this commit.
-			cm.Enriched = true
-			return nil
-		})
-	}
-	err := g.Wait()
-
-	delivered := 0
-	for i := range subset {
-		if commits[i].Enriched {
-			delivered++
+	for i := range requested {
+		if c.budgetRemaining() <= 0 {
+			return i, apibudget.ErrBudgetExceeded
 		}
+		cm := &commits[i]
+		owner, repo, ok := splitRepo(cm.Repo)
+		if !ok {
+			return i, fmt.Errorf("invalid repo %q", cm.Repo)
+		}
+		files, err := c.commitFiles(ctx, owner, repo, cm.SHA, q)
+		cm.Files = files
+		if err != nil {
+			return i, err
+		}
+		cm.Enriched = true
 	}
-	return delivered, err
+	return requested, nil
 }
 
 // commitFiles fetches one commit's file list.
@@ -576,11 +520,11 @@ func (c *Client) commitFiles(ctx context.Context, owner, repo, sha string, q mod
 	var files []*github.CommitFile
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, fmt.Errorf("get commit details %s/%s@%s: exceeded max pages (%d)", owner, repo, sha, maxPages)
+			return activityFiles(files), fmt.Errorf("get commit details %s/%s@%s: exceeded max pages (%d)", owner, repo, sha, maxPages)
 		}
 		rc, resp, err := c.gh.Repositories.GetCommit(ctx, owner, repo, sha, opts)
 		if err != nil {
-			return nil, apiError(fmt.Sprintf("get commit details %s/%s@%s", owner, repo, sha), err)
+			return activityFiles(files), apiError(fmt.Sprintf("get commit details %s/%s@%s", owner, repo, sha), err)
 		}
 		files = append(files, rc.Files...)
 		if resp == nil || resp.NextPage == 0 {
@@ -589,6 +533,10 @@ func (c *Client) commitFiles(ctx context.Context, owner, repo, sha string, q mod
 		opts.Page = resp.NextPage
 	}
 
+	return activityFiles(files), nil
+}
+
+func activityFiles(files []*github.CommitFile) []model.File {
 	// Patch text is deliberately not carried on enriched commits: the change
 	// set already bounds and reports patches, and duplicating them here would
 	// multiply output for no extra evidence.
@@ -603,7 +551,7 @@ func (c *Client) commitFiles(ctx context.Context, owner, repo, sha string, q mod
 			Changes:      f.GetChanges(),
 		})
 	}
-	return out, nil
+	return out
 }
 
 func anyPatchTruncated(cs model.ChangeSet) bool {
