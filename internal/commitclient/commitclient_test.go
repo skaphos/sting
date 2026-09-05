@@ -2,6 +2,9 @@
 package commitclient
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -115,6 +118,48 @@ func TestNewActivityAppliesTheQueryCeiling(t *testing.T) {
 	}
 	if got := gh.Cost().Ceiling; got != 42 {
 		t.Errorf("ceiling = %d, want 42 — the query's ceiling did not reach the client", got)
+	}
+}
+
+func TestNewAppliesGitLabQueryCeiling(t *testing.T) {
+	c, err := New(config.Default(), model.Query{
+		Provider: model.ProviderGitLab, MaxRequests: 42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gl, ok := c.(*gitlabclient.Client)
+	if !ok {
+		t.Fatalf("New(gitlab) = %T, want *gitlabclient.Client", c)
+	}
+	if got := gl.Cost().Ceiling; got != 42 {
+		t.Errorf("ceiling = %d, want 42", got)
+	}
+}
+
+func TestNewGitLabClientUsesBearerAuthentication(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer oauth-fixture" {
+			http.Error(w, "bearer token required", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Default()
+	cfg.GitLabToken = "oauth-fixture"
+	cfg.GitLabBaseURL = srv.URL + "/api/v4/"
+	q := model.Query{
+		Provider: model.ProviderGitLab, Author: "alice", Scope: model.ScopeRepos,
+		Repos: []string{"a/b"}, MaxRequests: 10,
+	}
+	c, err := New(cfg, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Collect(context.Background(), q); err != nil {
+		t.Fatalf("GitLab OAuth-compatible bearer authentication failed: %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v91/github"
+	"github.com/skaphos/sting/internal/activity"
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
@@ -253,10 +254,8 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	// stopped, so they are returned alongside the error with Truncated set to
 	// mark the result incomplete (Constitution VI).
 	if err != nil {
-		if len(commits) > 0 {
-			truncated = true
-		}
-		return model.Result{
+		truncated = true
+		res := model.Result{
 			SchemaVersion: model.SchemaVersion,
 			GeneratedAt:   time.Now(),
 			Provider:      model.ProviderGitHub,
@@ -267,8 +266,15 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 			Count:         len(commits),
 			Commits:       commits,
 			Truncated:     truncated,
+			Cost:          c.Cost(),
 			Skipped:       skipped,
-		}, err
+		}
+		if errors.Is(err, apibudget.ErrBudgetExceeded) {
+			res.Disclosures = append(res.Disclosures,
+				activity.BudgetBounded(res.Cost.Consumed, res.Cost.Ceiling))
+			return res, nil
+		}
+		return res, err
 	}
 
 	// Enrich only the commits that survive the cap, and do it concurrently. The
@@ -290,7 +296,7 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		}
 	}
 
-	return model.Result{
+	res := model.Result{
 		SchemaVersion: model.SchemaVersion,
 		GeneratedAt:   time.Now(),
 		Provider:      model.ProviderGitHub,
@@ -301,8 +307,15 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 		Count:         len(commits),
 		Commits:       commits,
 		Truncated:     truncated,
+		Cost:          c.Cost(),
 		Skipped:       skipped,
-	}, enrichErr
+	}
+	if errors.Is(enrichErr, apibudget.ErrBudgetExceeded) {
+		res.Disclosures = append(res.Disclosures,
+			activity.BudgetBounded(res.Cost.Consumed, res.Cost.Ceiling))
+		return res, nil
+	}
+	return res, enrichErr
 }
 
 // searchByAuthor uses GitHub's global commit search index.

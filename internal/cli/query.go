@@ -132,6 +132,16 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 
 	result, err := client.Collect(ctx, q)
 	if err != nil {
+		// A later-page or enrichment failure does not invalidate evidence already
+		// gathered. Render it before returning the failure so callers receive both
+		// the partial result and its attributable error.
+		if len(result.Commits) > 0 || len(result.Skipped) > 0 {
+			out, renderErr := render.Render(result, outFormat)
+			if renderErr != nil {
+				return renderErr
+			}
+			cmd.Println(out)
+		}
 		return err
 	}
 

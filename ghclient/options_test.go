@@ -3,7 +3,6 @@ package ghclient
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/model"
 )
 
@@ -149,8 +147,8 @@ func TestBudgetTransportCountsRealRequests(t *testing.T) {
 }
 
 // TestBudgetCeilingStopsRealRequests confirms enforcement reaches the wire: once
-// the ceiling is spent the server must stop seeing requests, and the error must
-// still be recognizable as a budget stop after go-github has wrapped it.
+// the ceiling is spent the server stops seeing requests and Collect returns a
+// visibly bounded partial result instead of failing the query.
 func TestBudgetCeilingStopsRealRequests(t *testing.T) {
 	var hits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -176,12 +174,12 @@ func TestBudgetCeilingStopsRealRequests(t *testing.T) {
 		Since:  time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 		Until:  time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC),
 	}
-	_, err = c.Collect(context.Background(), q)
-	if err == nil {
-		t.Fatal("Collect succeeded past the ceiling")
+	res, err := c.Collect(context.Background(), q)
+	if err != nil {
+		t.Fatalf("bounded result returned an error: %v", err)
 	}
-	if !errors.Is(err, apibudget.ErrBudgetExceeded) {
-		t.Errorf("error = %v, want it to unwrap to ErrBudgetExceeded", err)
+	if len(res.Disclosures) != 1 || res.Disclosures[0].Kind != model.DisclosureBudgetBounded {
+		t.Errorf("Disclosures = %+v, want budget-bounded", res.Disclosures)
 	}
 	if got := hits.Load(); got != ceiling {
 		t.Errorf("server saw %d requests, want exactly %d", got, ceiling)

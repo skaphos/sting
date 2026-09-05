@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/internal/mcpinstall"
+	"github.com/skaphos/sting/model"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -840,6 +842,77 @@ func TestRunQueryLoadConfigError(t *testing.T) {
 	}
 	if err := runQuery(cmd, nil); err == nil {
 		t.Fatal("runQuery(bad config): expected error")
+	}
+}
+
+func TestRunQueryBudgetStopPrintsPartialCommits(t *testing.T) {
+	seedValidConfig(t)
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", "<"+srv.URL+r.URL.Path+"?page=2>; rel=\"next\"")
+		_, _ = w.Write([]byte(`[{"sha":"collected","commit":{"author":{"date":"2026-07-20T00:00:00Z"},"message":"retained evidence"}}]`))
+	}))
+	defer srv.Close()
+	v.Set("base_url", srv.URL+"/")
+	v.Set("token", "fixture")
+
+	cmd, out, _ := newCmd()
+	cmd.SetContext(context.Background())
+	registerQueryFlags(cmd)
+	for name, value := range map[string]string{
+		"author": "alice", "scope": "repos", "repos": "a/b",
+		"max-requests": "1", "format": "json",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := runQuery(cmd, nil); err != nil {
+		t.Fatalf("a bounded query must exit successfully: %v", err)
+	}
+	if !strings.Contains(out.String(), "collected") {
+		t.Fatalf("CLI discarded collected evidence: %s", out.String())
+	}
+	if !strings.Contains(out.String(), model.DisclosureBudgetBounded) {
+		t.Fatalf("CLI omitted the budget disclosure: %s", out.String())
+	}
+}
+
+func TestRunQueryProviderFailurePrintsPartialCommits(t *testing.T) {
+	seedValidConfig(t)
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			http.Error(w, "outage", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", "<"+srv.URL+r.URL.Path+"?page=2>; rel=\"next\"")
+		_, _ = w.Write([]byte(`[{"sha":"collected","commit":{"author":{"date":"2026-07-20T00:00:00Z"},"message":"retained evidence"}}]`))
+	}))
+	defer srv.Close()
+	v.Set("base_url", srv.URL+"/")
+	v.Set("token", "fixture")
+
+	cmd, out, _ := newCmd()
+	cmd.SetContext(context.Background())
+	registerQueryFlags(cmd)
+	for name, value := range map[string]string{
+		"author": "alice", "scope": "repos", "repos": "a/b", "format": "json",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := runQuery(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("provider failure = %v, want the later-page error", err)
+	}
+	if !strings.Contains(out.String(), "collected") {
+		t.Fatalf("CLI discarded evidence gathered before the error: %s", out.String())
 	}
 }
 

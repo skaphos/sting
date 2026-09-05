@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/skaphos/sting/internal/activity"
+	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
 	"golang.org/x/sync/errgroup"
@@ -46,12 +48,24 @@ type Client struct {
 	token       string
 	perPage     int
 	concurrency int
+
+	budget        *apibudget.Transport
+	budgetCeiling int
+	budgetEnabled bool
 }
 
 // New builds a Client. token may be empty for public data. baseURL, when set,
 // targets a GitLab API v4 root (e.g. "https://gitlab.example.com/api/v4/").
-// perPage is clamped to the API's 1-100 range.
-func New(token, baseURL string, perPage int) (*Client, error) {
+// perPage is clamped to the API's 1-100 range. WithRequestBudget can install a
+// fixed client ceiling; without it, Collect meters against Query.MaxRequests.
+func New(token, baseURL string, perPage int, opts ...Option) (*Client, error) {
+	c := &Client{concurrency: defaultConcurrency}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURL
 	}
@@ -72,20 +86,42 @@ func New(token, baseURL string, perPage int) (*Client, error) {
 	if perPage > 100 {
 		perPage = 100
 	}
-	return &Client{
-		// A dedicated client with a timeout, rather than the shared
-		// http.DefaultClient, so a stalled request cannot hang a scan and the
-		// global default client is never mutated.
-		http:        &http.Client{Timeout: httpTimeout},
-		baseURL:     base,
-		token:       token,
-		perPage:     perPage,
-		concurrency: defaultConcurrency,
-	}, nil
+	httpClient := &http.Client{Timeout: httpTimeout}
+	if c.budgetEnabled {
+		c.budget = apibudget.NewTransport(http.DefaultTransport, c.budgetCeiling)
+		httpClient.Transport = c.budget
+	}
+	c.http = httpClient
+	c.baseURL = base
+	c.token = token
+	c.perPage = perPage
+	return c, nil
+}
+
+// Cost reports requests consumed when the client was constructed with
+// WithRequestBudget. Query results always carry their per-call cost, including
+// the compatibility path for three-argument New calls.
+func (c *Client) Cost() model.CostReport {
+	if c.budget == nil {
+		return model.CostReport{}
+	}
+	return c.budget.Report()
 }
 
 // Collect runs a query using its scope and returns the normalized result.
 func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, error) {
+	// Three-argument New calls predate request-budget options. Honor the Query
+	// contract for those public callers by creating a per-query metered clone;
+	// application callers already install the same ceiling in commitclient.New.
+	if c.budget == nil {
+		metered, err := New(c.token, c.baseURL, c.perPage, WithRequestBudget(q.MaxRequests))
+		if err != nil {
+			return model.Result{}, err
+		}
+		metered.concurrency = c.concurrency
+		return metered.Collect(ctx, q)
+	}
+
 	until := q.Until
 	if until.IsZero() {
 		until = time.Now()
@@ -115,14 +151,38 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	default:
 		return model.Result{}, fmt.Errorf("unsupported scope %q", q.Scope)
 	}
-	if err != nil {
-		return model.Result{}, err
-	}
-
 	truncated := false
 	if q.MaxCommits > 0 && len(commits) > q.MaxCommits {
 		commits = commits[:q.MaxCommits]
 		truncated = true
+	}
+
+	result := func() model.Result {
+		return model.Result{
+			SchemaVersion: model.SchemaVersion,
+			GeneratedAt:   time.Now(),
+			Provider:      model.ProviderGitLab,
+			Author:        q.Author,
+			Scope:         q.Scope,
+			Since:         q.Since,
+			Until:         q.Until,
+			Count:         len(commits),
+			Commits:       commits,
+			Truncated:     truncated,
+			Cost:          c.Cost(),
+			Skipped:       skipped,
+		}
+	}
+
+	if err != nil {
+		truncated = true
+		res := result()
+		if errors.Is(err, apibudget.ErrBudgetExceeded) {
+			res.Disclosures = append(res.Disclosures,
+				activity.BudgetBounded(res.Cost.Consumed, res.Cost.Ceiling))
+			return res, nil
+		}
+		return res, err
 	}
 
 	// Stats already arrived inline with the commit list (with_stats); only files
@@ -130,23 +190,18 @@ func (c *Client) Collect(ctx context.Context, q model.Query) (model.Result, erro
 	// the commits that survive the cap (so the truncation-probe commit is skipped).
 	if q.IncludeFiles || q.IncludeDiffs {
 		if err := c.enrichDiffs(ctx, commits, q); err != nil {
-			return model.Result{}, err
+			truncated = true
+			res := result()
+			if errors.Is(err, apibudget.ErrBudgetExceeded) {
+				res.Disclosures = append(res.Disclosures,
+					activity.BudgetBounded(res.Cost.Consumed, res.Cost.Ceiling))
+				return res, nil
+			}
+			return res, err
 		}
 	}
 
-	return model.Result{
-		SchemaVersion: model.SchemaVersion,
-		GeneratedAt:   time.Now(),
-		Provider:      model.ProviderGitLab,
-		Author:        q.Author,
-		Scope:         q.Scope,
-		Since:         q.Since,
-		Until:         q.Until,
-		Count:         len(commits),
-		Commits:       commits,
-		Truncated:     truncated,
-		Skipped:       skipped,
-	}, nil
+	return result(), nil
 }
 
 func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, error) {
@@ -157,17 +212,17 @@ func (c *Client) listRepos(ctx context.Context, q model.Query) ([]model.Commit, 
 	for _, target := range q.Repos {
 		project := strings.TrimSpace(target)
 		if project == "" {
-			return nil, fmt.Errorf("invalid repo %q", target)
+			return out, fmt.Errorf("invalid repo %q", target)
 		}
 		projectQuery := remainingQuery(q, len(out))
 		if projectQuery.MaxCommits == 0 && q.MaxCommits > 0 {
 			return out, nil
 		}
 		commits, err := c.listProjectCommits(ctx, project, project, projectQuery)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, commits...)
+		if err != nil {
+			return out, err
+		}
 		if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 			break
 		}
@@ -196,13 +251,13 @@ func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, 
 	endpoint := "groups/" + url.PathEscape(strings.TrimSpace(q.Org)) + "/projects"
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, nil, fmt.Errorf("list group projects %s: exceeded max pages (%d)", q.Org, maxPages)
+			return out, skipped, fmt.Errorf("list group projects %s: exceeded max pages (%d)", q.Org, maxPages)
 		}
 		values.Set("page", strconv.Itoa(page))
 		var projects []gitlabProject
 		next, err := c.get(ctx, "list group projects "+q.Org, endpoint, values, &projects)
 		if err != nil {
-			return nil, nil, err
+			return out, skipped, err
 		}
 		for _, project := range projects {
 			target := strconv.FormatInt(project.ID, 10)
@@ -215,14 +270,14 @@ func (c *Client) listGroup(ctx context.Context, q model.Query) ([]model.Commit, 
 				return out, skipped, nil
 			}
 			commits, err := c.listProjectCommits(ctx, target, label, projectQuery)
+			out = append(out, commits...)
 			if err != nil {
 				if reason, skip := skipProjectReason(err); skip {
 					skipped = append(skipped, model.SkippedRepo{Repo: label, Reason: reason})
 					continue
 				}
-				return nil, nil, err
+				return out, skipped, err
 			}
-			out = append(out, commits...)
 			if q.MaxCommits > 0 && len(out) >= q.MaxCommits {
 				return out, skipped, nil
 			}
@@ -254,13 +309,13 @@ func (c *Client) listProjectCommits(ctx context.Context, project, repoLabel stri
 	var out []model.Commit
 	for page := 1; ; page++ {
 		if page > maxPages {
-			return nil, fmt.Errorf("list commits %s: exceeded max pages (%d)", repoLabel, maxPages)
+			return out, fmt.Errorf("list commits %s: exceeded max pages (%d)", repoLabel, maxPages)
 		}
 		values.Set("page", strconv.Itoa(page))
 		var commits []gitlabCommit
 		next, err := c.get(ctx, "list commits "+repoLabel, endpoint, values, &commits)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		for _, gc := range commits {
 			out = append(out, fromCommit(repoLabel, gc))
@@ -287,7 +342,10 @@ func (c *Client) get(ctx context.Context, op, endpoint string, values url.Values
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "sting")
 	if c.token != "" {
-		req.Header.Set("PRIVATE-TOKEN", c.token)
+		// GitLab accepts OAuth access tokens and personal/project/group access
+		// tokens through the standard bearer scheme, so token resolution does not
+		// need to leak credential type into this provider client.
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.http.Do(req)
@@ -464,6 +522,18 @@ func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string,
 	values.Set("per_page", strconv.Itoa(c.perPage))
 
 	var out []model.File
+	// Publish each successfully decoded page even if a later page fails. The
+	// commit metadata and earlier file details remain valid partial evidence.
+	defer func() {
+		cm.Files = out
+		if cm.Additions == 0 && cm.Deletions == 0 {
+			for _, f := range out {
+				cm.Additions += f.Additions
+				cm.Deletions += f.Deletions
+			}
+			cm.Changes = cm.Additions + cm.Deletions
+		}
+	}()
 	budget := q.MaxDiffBytes
 	if budget <= 0 {
 		budget = model.DefaultMaxDiffBytes
@@ -502,14 +572,6 @@ func (c *Client) fillDiffDetails(ctx context.Context, project, repoLabel string,
 		if next == "" {
 			break
 		}
-	}
-	cm.Files = out
-	if cm.Additions == 0 && cm.Deletions == 0 {
-		for _, f := range out {
-			cm.Additions += f.Additions
-			cm.Deletions += f.Deletions
-		}
-		cm.Changes = cm.Additions + cm.Deletions
 	}
 	return nil
 }
