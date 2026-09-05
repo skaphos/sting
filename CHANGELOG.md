@@ -4,6 +4,21 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/skaphos/sting/compare/v1.1.0...v1.2.0) (2026-09-05)
+
+
+### Features
+
+* add PR activity query and personal PR inbox ([#154](https://github.com/skaphos/sting/issues/154)) ([50eb9df](https://github.com/skaphos/sting/commit/50eb9dfff401af76f97e498098163a3850429f19))
+
+
+### Bug Fixes
+
+* disclose query completeness and window date semantics ([#152](https://github.com/skaphos/sting/issues/152)) ([742bb34](https://github.com/skaphos/sting/commit/742bb34971b696cc3f3577f9c5011c42f7db709a))
+* preserve bounded provider query evidence ([#148](https://github.com/skaphos/sting/issues/148)) ([1beef4d](https://github.com/skaphos/sting/commit/1beef4db5ea5031e358fef307dfedee507ad21fe)), closes [#130](https://github.com/skaphos/sting/issues/130) [#131](https://github.com/skaphos/sting/issues/131) [#135](https://github.com/skaphos/sting/issues/135) [#137](https://github.com/skaphos/sting/issues/137)
+* preserve complete and partial activity evidence ([#151](https://github.com/skaphos/sting/issues/151)) ([b6f95e5](https://github.com/skaphos/sting/commit/b6f95e5bab72f41727d773355713f096331710e3))
+* preserve configuration integrity during setup ([#150](https://github.com/skaphos/sting/issues/150)) ([fd28871](https://github.com/skaphos/sting/commit/fd2887199faf3117977bdf3c58c833703b9081aa)), closes [#139](https://github.com/skaphos/sting/issues/139) [#140](https://github.com/skaphos/sting/issues/140) [#143](https://github.com/skaphos/sting/issues/143)
+
 ## [1.1.0](https://github.com/skaphos/sting/compare/v1.0.0...v1.1.0) (2026-07-26)
 
 
