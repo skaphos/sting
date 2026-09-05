@@ -47,3 +47,6 @@ include_prs: false           # discover open-PR branch commits (GitHub, scope=re
 # quota, so the same request cannot return different results depending on
 # unrelated prior activity.
 max_requests: 500
+
+# PR activity/inbox result cap (STING_MAX_PRS / --max-prs; 0 disables).
+max_prs: 100

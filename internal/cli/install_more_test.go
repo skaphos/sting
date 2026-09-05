@@ -2,10 +2,13 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/skaphos/sting/internal/mcpserver"
 )
 
 // TestRunInstallPreservesDisabled is the P2 regression: reinstalling must not
@@ -137,5 +140,20 @@ func TestRunUninstallMalformedEntryDoesNotAbortOthers(t *testing.T) {
 	}
 	if strings.Contains(string(got), "mcp_servers.sting") {
 		t.Errorf("malformed grok sting entry not removed:\n%s", got)
+	}
+}
+
+func TestPRToolsInDerivedPermissionSnippet(t *testing.T) {
+	var out bytes.Buffer
+	if err := printClaudePermissionsBlock(&out); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range mcpserver.ReadOnlyTools() {
+		if !strings.Contains(out.String(), "mcp__sting__"+tool) {
+			t.Errorf("missing derived permission %s", tool)
+		}
+	}
+	if !strings.Contains(out.String(), "get_prs") || !strings.Contains(out.String(), "get_pr_inbox") {
+		t.Fatal("new tools missing from permissions")
 	}
 }

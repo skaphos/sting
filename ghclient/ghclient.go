@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Package ghclient wraps the go-github client with the commit-discovery
-// strategies the tool needs and normalizes results into model types.
+// Package ghclient wraps go-github with commit, repository-activity, and PR
+// discovery strategies and normalizes read-only evidence into model types.
 package ghclient
 
 import (
@@ -120,11 +120,12 @@ func isRateLimited(er *github.ErrorResponse) bool {
 	return strings.Contains(strings.ToLower(er.Message), "rate limit")
 }
 
-// Client retrieves commits from GitHub for an author over a time window.
+// Client retrieves GitHub evidence. PR collection calls own independent budgets.
 type Client struct {
-	gh          *github.Client
-	perPage     int
-	concurrency int
+	token, baseURL string
+	gh             *github.Client
+	perPage        int
+	concurrency    int
 
 	// budget counts and bounds provider requests when WithRequestBudget was
 	// supplied; nil otherwise. budgetCeiling/budgetEnabled are set by the
@@ -144,7 +145,7 @@ type Client struct {
 // WithRequestBudget installs a transport that everything else must be layered
 // on top of.
 func New(token, baseURL string, perPage int, opts ...Option) (*Client, error) {
-	c := &Client{concurrency: defaultConcurrency}
+	c := &Client{concurrency: defaultConcurrency, token: token, baseURL: baseURL}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)

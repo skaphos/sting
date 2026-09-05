@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Package mcpserver exposes the commit-query capability as an MCP tool over a
-// stdio transport, so an LLM agent can ask for an author's recent commits.
+// Package mcpserver exposes read-only commit, repository-activity, PR-activity,
+// and personal-inbox tools over MCP, with shared registration and validation.
 package mcpserver
 
 import (
@@ -99,12 +99,26 @@ func toolDefinitions() []toolDefinition {
 				mcp.AddTool(server, tool, h.getRepoActivity)
 			},
 		},
+		{
+			tool:     &mcp.Tool{Name: "get_prs", Description: "Report GitHub PR opening, merging, and unmerged-closure actions within an inclusive window. Search requires an author; repos/org may omit it. Defaults to all current states and all drafts. Uses budgeted lifecycle history and discloses coverage gaps. Unrestricted search is public-only. Use get_pr_inbox for current work without a date cutoff. No optional detail enrichment or mutations.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(true)}},
+			register: func(server *mcp.Server, tool *mcp.Tool, h *handler) { mcp.AddTool(server, tool, h.getPRs) },
+		},
+		{
+			tool:     &mcp.Tool{Name: "get_pr_inbox", Description: "Find current open GitHub PRs authored by, assigned to, or directly requesting review from one user, without an age cutoff. Defaults to sting's authenticated user; drafts included. Team-only requests do not qualify. Search/repos/org scopes, bounded discovery and explicit incomplete evidence. Unrestricted search is public-only. No date/state/author/role inputs: use get_prs for activity during a window. Read-only summary; no provider actions.", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(true)}},
+			register: func(server *mcp.Server, tool *mcp.Tool, h *handler) { mcp.AddTool(server, tool, h.getPRInbox) },
+		},
 	}
 }
 
 // New builds an MCP server exposing sting's read-only tools, configured from
 // cfg.
 func New(cfg config.Config) (*mcp.Server, error) {
+	if cfg.PerPage < 1 || cfg.PerPage > 100 {
+		return nil, fmt.Errorf("per_page must be 1-100")
+	}
+	if cfg.MaxRequests < 0 {
+		return nil, fmt.Errorf("max_requests must be >= 0")
+	}
 	h := &handler{cfg: cfg}
 
 	server := mcp.NewServer(&mcp.Implementation{
@@ -171,6 +185,10 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 			err = nil
 		}
 	}()
+
+	if err := h.cfg.Validate(); err != nil {
+		return nil, model.Result{}, err
+	}
 
 	req := config.Request{
 		Provider: in.Provider,

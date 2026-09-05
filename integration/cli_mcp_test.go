@@ -92,7 +92,7 @@ func TestCLIAndMCP(t *testing.T) {
 			}
 			names[tool.Name] = true
 		}
-		if len(names) != 2 || !names["get_commits"] || !names["get_repo_activity"] {
+		if len(names) != 4 || !names["get_commits"] || !names["get_repo_activity"] || !names["get_prs"] || !names["get_pr_inbox"] {
 			t.Fatalf("unexpected tool registry: %v", names)
 		}
 		commits, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_commits",

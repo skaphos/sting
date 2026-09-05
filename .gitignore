@@ -22,3 +22,10 @@ dist/
 graphify-out/*
 !graphify-out/GRAPH_REPORT.md
 .graphify_*
+
+# Local dependencies and editor artifacts
+vendor/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

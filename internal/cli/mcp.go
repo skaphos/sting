@@ -10,11 +10,11 @@ import (
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
 	Short: "Run the MCP server over stdio",
-	Long: "Serves the read-only get_commits tool over stdio for an LLM agent.\n\n" +
+	Long: "Serves the read-only get_commits, get_repo_activity, get_prs, and get_pr_inbox tools over stdio for an LLM agent.\n\n" +
 		"This is what `sting install` registers in each runtime. Stdout is owned by " +
 		"the MCP protocol, so do not mix it with other output.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		cfg, err := loadConfig()
+		cfg, err := loadPRConfig()
 		if err != nil {
 			return err
 		}

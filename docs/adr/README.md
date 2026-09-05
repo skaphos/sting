@@ -14,3 +14,4 @@ Supersede an accepted record with a new one rather than rewriting it.
 - [0009 — GoReleaser owns the GitHub release](0009-goreleaser-owns-the-github-release.md) (supersedes part of 0005)
 - [0010 — Multi-tool MCP server](0010-multi-tool-mcp-server.md) (supersedes the single-tool framing of 0001)
 - [0011 — No self-update subcommand](0011-no-self-update-subcommand.md) (deviation from skaphos-resources DECISIONS/0001)
+- [0012 — PR lifecycle activity and personal inbox](0012-pr-activity-and-personal-inbox.md) (Proposed)

@@ -53,6 +53,8 @@ type Config struct {
 	PerPage int `mapstructure:"per_page"`
 	// MaxCommits caps results per query (0 = unlimited).
 	MaxCommits int `mapstructure:"max_commits"`
+	// MaxPRs caps distinct PRs in either PR workflow (0 = unlimited).
+	MaxPRs int `mapstructure:"max_prs"`
 	// IncludeStats fetches per-commit line stats by default.
 	IncludeStats bool `mapstructure:"include_stats"`
 	// IncludeFiles fetches per-file change summaries by default.
@@ -87,6 +89,7 @@ func Default() Config {
 		DefaultFormat:   "markdown",
 		PerPage:         100,
 		MaxCommits:      DefaultMaxCommits,
+		MaxPRs:          DefaultMaxPRs,
 		IncludeStats:    false,
 		IncludeFiles:    false,
 		IncludeDiffs:    false,
@@ -114,6 +117,7 @@ func Defaults() map[string]any {
 		"default_format":  d.DefaultFormat,
 		"per_page":        d.PerPage,
 		"max_commits":     d.MaxCommits,
+		"max_prs":         d.MaxPRs,
 		"include_stats":   d.IncludeStats,
 		"include_files":   d.IncludeFiles,
 		"include_diffs":   d.IncludeDiffs,
@@ -136,6 +140,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return fmt.Errorf("per_page must be 1-100, got %d", cfg.PerPage)
+	}
+	if cfg.MaxPRs < 0 {
+		return fmt.Errorf("max_prs must be >= 0, got %d", cfg.MaxPRs)
 	}
 	if cfg.MaxCommits < 0 {
 		return fmt.Errorf("max_commits must be >= 0, got %d", cfg.MaxCommits)

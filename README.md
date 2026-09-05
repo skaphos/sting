@@ -1,14 +1,16 @@
 # sting
 
-Query a GitHub or GitLab user's commits over a time window and hand them to an
-LLM agent (or a terminal) in a consumable form.
+Query GitHub or GitLab commits, GitHub PR activity during a window, or current personal
+PR work. Return structured evidence to an LLM agent or a terminal.
 
 `sting` is a single binary with subcommands:
 
 - **`sting init`** — guided first-time setup (strongly recommended).
 - **`sting auth`** — authenticate with GitHub or GitLab via OAuth (`auth github`, `auth gitlab`, `auth status`, `auth logout`). The verbose `auth login github` / `auth login gitlab` forms are also supported and behave identically.
-- **`sting mcp`** — runs an MCP server over stdio exposing two read-only tools,
-  `get_commits` and `get_repo_activity`.
+- **`sting mcp`** — runs an MCP server over stdio exposing four read-only tools:
+  `get_commits`, `get_repo_activity`, `get_prs`, and `get_pr_inbox`.
+- **`sting prs`** — reports PR opening, merging, and unmerged-closure actions during a window.
+- **`sting inbox`** — finds current open PRs you authored, are assigned to, or are requested to review.
 - **`sting <query flags>`** — prints a Markdown or JSON report locally.
 - **`sting activity`** — summarizes what happened in one GitHub repository over
   a window, without naming an author.
@@ -535,7 +537,7 @@ cmd/sting/            thin entrypoint -> internal/cli
 internal/cli/         cobra command tree + viper wiring
 internal/commitclient/ provider client selection
 internal/render/      JSON + Markdown rendering
-internal/mcpserver/   MCP server; read-only get_commits tool
+internal/mcpserver/   MCP server; four read-only commit/activity/PR tools
 internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)
 ```
 
@@ -546,3 +548,47 @@ internal/mcpinstall/  runtime adapters (Claude, Codex, OpenCode, Grok)
 Skaphos is a project of [Rillan AI LLC](https://skaphos.io), a Missouri
 limited liability company. © 2026 Rillan AI LLC. Released under
 the [MIT License](./LICENSE).
+
+## Pull request activity
+
+`sting prs --author octocat --window 7d` reports PR openings, merges, and unmerged
+closures during the window, including closures followed by later reopening. Remaining
+open does not qualify by itself; `--time-basis updated` explicitly selects latest updates.
+Current state defaults to `all`, and drafts are included. `--state closed` means currently
+closed without a merge. The MCP equivalent is `get_prs`.
+
+Results carry an independent schema, qualifying action timestamps, current metadata,
+request costs, and separate discovery/evidence completeness. Defaults are 100 PRs and
+500 requests; explicit zero disables the selected cap. Lifecycle history uses extra
+budgeted requests per candidate; optional PR details, diffs, and checks are not fetched.
+Unrestricted search is public-only and subject to GitHub search coverage limits. Use
+explicit targets for credential-visible private work. `include_prs` on commit queries
+still means commit discovery from open PR branches. PR activity is GitHub-only.
+
+Repository activity also supports `sting prs --scope repos --repos acme/api,acme/web`
+without an author filter. `sting prs --scope org --org acme` enumerates accessible repositories
+and discloses individual unreadable targets. Authentication and rate-limit failures stop
+collection while preserving evidence. Each scope uses the configured activity window.
+
+## Personal PR inbox
+
+`sting inbox --scope org --org acme` finds currently open PRs you authored, are assigned
+to, or are directly requested to review. Older work stays eligible; drafts are included.
+`--user octocat` overrides the user resolved from sting's dedicated GitHub credential.
+Use `--no-draft` to exclude drafts. The MCP equivalent is `get_pr_inbox`.
+
+All three reasons are combined and labeled on one entry per PR. Team-only requests,
+fulfilled/removed requests without another current relationship, and completed PRs do
+not qualify. Search verifies relationships through repository PR pages, which share the
+request budget. Provider changes and interrupted verification are disclosed; an incomplete
+report may not contain every match. Neither workflow assigns, reviews, closes, or merges PRs.
+
+For example, `sting prs --scope org --org acme --time-basis closed --window 2w -o json`
+asks what closed during the window; `sting inbox --scope repos --repos acme/api -o json`
+asks what needs attention now. JSON carries all evidence; Markdown displays its facts.
+Own request/result caps return successful partial reports. Provider/identity failures return
+partial evidence with a nonzero CLI exit or MCP `IsError`, including when no PRs were found.
+
+MCP validates shared settings at startup and workflow-specific settings before each call.
+An invalid activity default cannot block the inbox; an affected activity call fails locally.
+Malformed configuration or invalid shared settings still prevent MCP startup.
