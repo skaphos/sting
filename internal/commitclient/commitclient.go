@@ -72,7 +72,8 @@ func New(cfg config.Config, q model.Query) (Client, error) {
 		return client, nil
 	case model.ProviderGitLab:
 		token := resolveGitLabToken(cfg)
-		client, err := gitlabclient.New(token, cfg.GitLabBaseURL, cfg.PerPage)
+		client, err := gitlabclient.New(token, cfg.GitLabBaseURL, cfg.PerPage,
+			gitlabclient.WithRequestBudget(q.MaxRequests))
 		if err != nil {
 			return nil, fmt.Errorf("build gitlab client: %w", err)
 		}

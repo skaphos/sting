@@ -78,6 +78,26 @@ func TestMarkdownEmpty(t *testing.T) {
 	}
 }
 
+func TestMarkdownBudgetStopDoesNotClaimVerifiedEmpty(t *testing.T) {
+	r := model.Result{
+		Author: "x", Scope: model.ScopeSearch, Truncated: true,
+		Cost: model.CostReport{Consumed: 1, Ceiling: 1},
+		Disclosures: []model.Disclosure{{
+			Kind: model.DisclosureBudgetBounded, Reason: "ceiling reached", NextAction: "raise it",
+		}},
+	}
+
+	md := Markdown(r)
+	if strings.Contains(md, "No commits found") {
+		t.Fatalf("uncollected evidence rendered as verified absence:\n%s", md)
+	}
+	for _, want := range []string{"No commits were collected", "1 of 1", model.DisclosureBudgetBounded, "raise it"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
 func TestMarkdownSkipped(t *testing.T) {
 	r := model.Result{
 		Author: "x", Scope: model.ScopeOrg, Count: 0,

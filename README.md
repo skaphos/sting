@@ -252,7 +252,11 @@ scan.
 
 Every query is also bounded by a request ceiling (`max_requests`, default 500).
 Reaching it returns the evidence gathered so far rather than aborting, so a
-bounded run still exits `0`.
+bounded run still exits `0`. JSON and Markdown report the consumed request cost
+and a `budget-bounded` disclosure with the reason and next safe action. If a
+provider fails after gathering has begun, sting emits the partial evidence and
+still reports the provider error; it does not replace gathered commits with an
+empty result.
 
 ## Repository activity (`sting activity`)
 
@@ -420,6 +424,7 @@ directory, or pointed at explicitly with `--config path.yaml`.
 | `include_files`    | `STING_INCLUDE_FILES`   | (`--files`)          | `false`    | fetch changed file summaries             |
 | `include_diffs`    | `STING_INCLUDE_DIFFS`   | (`--diffs`)          | `false`    | fetch bounded patch text                 |
 | `max_diff_bytes`   | `STING_MAX_DIFF_BYTES`  | (`--max-diff-bytes`) | `60000`    | per-commit patch byte cap                |
+| `max_requests`     | `STING_MAX_REQUESTS`    | (`--max-requests`)   | `500`      | provider request cap (0 = unlimited)     |
 | `include_prs`      | `STING_INCLUDE_PRS`     | (`--prs`)            | `false`    | discover open-PR branch commits (GitHub) |
 
 Keys in parentheses are per-query request flags that override the resolved

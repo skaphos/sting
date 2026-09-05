@@ -162,7 +162,14 @@ type Result struct {
 	Until         time.Time `json:"until"`
 	Count         int       `json:"count"`
 	Commits       []Commit  `json:"commits"`
-	Truncated     bool      `json:"truncated,omitempty"` // true if MaxCommits clipped results
+	// Truncated is true when a cap or later-stage failure made the evidence
+	// incomplete.
+	Truncated bool `json:"truncated,omitempty"`
+	// Cost reports provider requests consumed by the query. Disclosures explain
+	// any bound or degradation so a partial result remains auditable in the
+	// structured evidence, not only in CLI or MCP error text.
+	Cost        CostReport   `json:"cost"`
+	Disclosures []Disclosure `json:"disclosures,omitempty"`
 	// Skipped lists repositories an org-scope scan could not list and skipped so
 	// that one bad repo (e.g. an empty repo, or one the token cannot read) does
 	// not abort the whole scan. Empty/omitted when nothing was skipped.

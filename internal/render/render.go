@@ -72,7 +72,12 @@ func toMarkdown(r model.Result) string {
 	b.WriteString("\n")
 
 	if r.Count == 0 {
-		b.WriteString("_No commits found in this window._\n")
+		if len(r.Disclosures) > 0 {
+			b.WriteString("_No commits were collected before the query stopped._\n\n")
+		} else {
+			b.WriteString("_No commits found in this window._\n\n")
+		}
+		writeResultCostAndDisclosures(&b, r)
 		return b.String()
 	}
 
@@ -119,7 +124,31 @@ func toMarkdown(r model.Result) string {
 		}
 		b.WriteString("\n")
 	}
+	writeResultCostAndDisclosures(&b, r)
 	return b.String()
+}
+
+func writeResultCostAndDisclosures(b *strings.Builder, r model.Result) {
+	if r.Cost == (model.CostReport{}) && len(r.Disclosures) == 0 {
+		return
+	}
+	b.WriteString("## Cost\n\n")
+	if r.Cost.Ceiling > 0 {
+		fmt.Fprintf(b, "- **Provider requests:** %d of %d\n", r.Cost.Consumed, r.Cost.Ceiling)
+	} else {
+		fmt.Fprintf(b, "- **Provider requests:** %d (uncapped)\n", r.Cost.Consumed)
+	}
+	if len(r.Disclosures) == 0 {
+		return
+	}
+	b.WriteString("\n## Disclosures\n\n")
+	for _, d := range r.Disclosures {
+		fmt.Fprintf(b, "- **%s:** %s", d.Kind, d.Reason)
+		if d.NextAction != "" {
+			fmt.Fprintf(b, " Next action: %s", d.NextAction)
+		}
+		b.WriteString("\n")
+	}
 }
 
 // writeSkipped notes any repositories an org scan skipped, so a partial result

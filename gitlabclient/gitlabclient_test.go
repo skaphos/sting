@@ -66,8 +66,11 @@ func TestCollectScopeRepos(t *testing.T) {
 		if got := r.URL.Query().Get("with_stats"); got != "true" {
 			t.Errorf("with_stats = %q, want true", got)
 		}
-		if got := r.Header.Get("PRIVATE-TOKEN"); got != "test-token" {
-			t.Errorf("PRIVATE-TOKEN = %q, want test-token", got)
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want Bearer test-token", got)
+		}
+		if got := r.Header.Get("PRIVATE-TOKEN"); got != "" {
+			t.Errorf("PRIVATE-TOKEN = %q, want empty when bearer authentication is used", got)
 		}
 		_, _ = w.Write([]byte(gitlabCommitsBody))
 	})

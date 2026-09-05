@@ -159,11 +159,10 @@ var collectCommits = func(ctx context.Context, cfg config.Config, q model.Query)
 // long-lived stdio server. The deferred recover below converts such a panic
 // into a tool-level error result instead.
 //
-// On the ordinary (non-panic) error paths, the real error is returned as the
-// handler's error value rather than folded into a success result: the go-sdk
-// only marshals the structured Out value when the handler's error is nil, so
-// returning the error here means a failure never emits a schema-shaped,
-// zero-commit structured payload alongside the IsError text.
+// On failures before evidence gathering, the real error is returned as the
+// handler's error value so the SDK does not marshal a fabricated empty result.
+// A later failure returns an IsError tool result plus the populated structured
+// output, preserving both the gathered evidence and the attributable failure.
 func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in GetCommitsInput) (res *mcp.CallToolResult, out model.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -216,6 +215,13 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 
 	result, colErr := collectCommits(ctx, h.cfg, q)
 	if colErr != nil {
+		if len(result.Commits) > 0 || len(result.Skipped) > 0 {
+			md := render.Markdown(result)
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{Text: md + "\nQuery stopped: " + colErr.Error()}},
+			}, result, nil
+		}
 		return nil, model.Result{}, colErr
 	}
 

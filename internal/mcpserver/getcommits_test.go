@@ -123,6 +123,39 @@ func TestGetCommitsSuccess(t *testing.T) {
 	}
 }
 
+func TestGetCommitsKeepsPartialCollectorResult(t *testing.T) {
+	orig := collectCommits
+	t.Cleanup(func() { collectCommits = orig })
+	collectCommits = func(context.Context, config.Config, model.Query) (model.Result, error) {
+		return model.Result{
+			SchemaVersion: model.SchemaVersion,
+			Author:        "alice",
+			Scope:         model.ScopeRepos,
+			Count:         1,
+			Commits:       []model.Commit{{SHA: "collected", Repo: "a/b"}},
+			Truncated:     true,
+		}, errors.New("later provider page failed")
+	}
+
+	h := &handler{cfg: config.Default()}
+	res, out, err := h.getCommits(context.Background(), nil, GetCommitsInput{
+		Author: "alice", Scope: "repos", Repos: []string{"a/b"},
+	})
+	if err != nil {
+		t.Fatalf("partial MCP result should be returned as a tool error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("CallToolResult = %+v, want IsError with partial evidence", res)
+	}
+	if out.Count != 1 || out.Commits[0].SHA != "collected" {
+		t.Fatalf("structured result = %+v, want collected commit retained", out)
+	}
+	text := firstText(res)
+	if !strings.Contains(text, "a/b") || !strings.Contains(text, "later provider page failed") {
+		t.Fatalf("tool text omitted evidence or error: %s", text)
+	}
+}
+
 func TestGetCommitsMaxCommitsOverride(t *testing.T) {
 	const payload = `{
 		"total_count": 2,
