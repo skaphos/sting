@@ -53,6 +53,8 @@ type Config struct {
 	PerPage int `mapstructure:"per_page"`
 	// MaxCommits caps results per query (0 = unlimited).
 	MaxCommits int `mapstructure:"max_commits"`
+	// MaxPRs caps distinct PRs in either PR workflow (0 = unlimited).
+	MaxPRs int `mapstructure:"max_prs"`
 	// IncludeStats fetches per-commit line stats by default.
 	IncludeStats bool `mapstructure:"include_stats"`
 	// IncludeFiles fetches per-file change summaries by default.
@@ -87,6 +89,7 @@ func Default() Config {
 		DefaultFormat:   "markdown",
 		PerPage:         100,
 		MaxCommits:      DefaultMaxCommits,
+		MaxPRs:          DefaultMaxPRs,
 		IncludeStats:    false,
 		IncludeFiles:    false,
 		IncludeDiffs:    false,
@@ -114,6 +117,7 @@ func Defaults() map[string]any {
 		"default_format":  d.DefaultFormat,
 		"per_page":        d.PerPage,
 		"max_commits":     d.MaxCommits,
+		"max_prs":         d.MaxPRs,
 		"include_stats":   d.IncludeStats,
 		"include_files":   d.IncludeFiles,
 		"include_diffs":   d.IncludeDiffs,
@@ -124,6 +128,9 @@ func Defaults() map[string]any {
 }
 
 // Validate checks that the resolved configuration is internally consistent.
+// It covers shared and commit/activity settings. max_prs is deliberately
+// excluded: ResolvePRs and ResolvePRInbox own it, so an invalid PR default
+// rejects only the PR workflows instead of unrelated commit and activity calls.
 func (cfg Config) Validate() error {
 	if cfg.DefaultProvider != "" && !cfg.DefaultProvider.Valid() {
 		return fmt.Errorf("invalid provider %q (want github|gitlab)", cfg.DefaultProvider)

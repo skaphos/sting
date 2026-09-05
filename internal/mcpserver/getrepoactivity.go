@@ -69,6 +69,10 @@ func (h *handler) getRepoActivity(ctx context.Context, _ *mcp.CallToolRequest, i
 		}
 	}()
 
+	if err := h.cfg.Validate(); err != nil {
+		return nil, model.ActivityResult{}, err
+	}
+
 	req := config.ActivityRequest{
 		Provider:     string(model.ProviderGitHub),
 		Repo:         in.Repo,

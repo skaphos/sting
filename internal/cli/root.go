@@ -23,8 +23,9 @@ import (
 const envPrefix = "STING"
 
 var (
-	v          = viper.New()
-	configFile string
+	v             = viper.New()
+	configFile    string
+	configReadErr error
 )
 
 var rootCmd = &cobra.Command{
@@ -32,7 +33,8 @@ var rootCmd = &cobra.Command{
 	Short: "Query a GitHub or GitLab user's commits over a time window",
 	Long: "sting reports a GitHub or GitLab user's commits over a time window for an LLM agent or a terminal.\n\n" +
 		"Run `sting query` (or supply query flags directly) to print a report, " +
-		"`sting mcp` to serve the read-only get_commits tool over stdio, " +
+		"`sting prs` for PR actions during a window, `sting inbox` for current personal work, " +
+		"`sting mcp` to serve four read-only tools over stdio, " +
 		"or `sting install` to register that server with your agent runtimes.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -65,13 +67,16 @@ func init() {
 	// with the exact same flag surface (and satisfies documented usage).
 	registerQueryFlags(queryCmd)
 	registerActivityFlags(activityCmd)
+	registerPRFlags(prsCmd)
+	registerInboxFlags(inboxCmd)
 
-	rootCmd.AddCommand(queryCmd, activityCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
+	rootCmd.AddCommand(inboxCmd, prsCmd, queryCmd, activityCmd, mcpCmd, installCmd, uninstallCmd, versionCmd, authCmd, initCmd)
 }
 
 // initConfig seeds defaults, wires environment overrides, and reads the config
 // file. It runs after flag parsing via cobra.OnInitialize.
 func initConfig() {
+	configReadErr = nil
 	for key, val := range config.Defaults() {
 		v.SetDefault(key, val)
 	}
@@ -91,9 +96,13 @@ func initConfig() {
 	}
 
 	if err := v.ReadInConfig(); err != nil && !configMissing(err) {
-		// A missing config file is fine (sting works from defaults/env/flags); a
-		// real parse error is worth surfacing without aborting the command.
-		fmt.Fprintln(os.Stderr, "sting: warning: "+err.Error())
+		// A missing config file is fine (sting works from defaults/env/flags). A
+		// real parse error is recorded rather than aborting startup, because the
+		// commands disagree about how to treat it: query and activity continue
+		// from defaults, while the PR workflows and `sting mcp` refuse to run on
+		// defaults they cannot confirm. See loadConfig and loadPRConfig.
+		configReadErr = err
+		fmt.Fprintln(os.Stderr, "sting: warning: configuration could not be read; check file syntax and access. query and activity continue from defaults; prs, inbox, and mcp fail until it is fixed")
 	}
 }
 

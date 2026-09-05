@@ -13,7 +13,7 @@ import (
 // this test should fail until the installer's auto-approve list is reconsidered.
 func TestReadOnlyTools(t *testing.T) {
 	got := ReadOnlyTools()
-	want := []string{"get_commits", "get_repo_activity"}
+	want := []string{"get_commits", "get_repo_activity", "get_prs", "get_pr_inbox"}
 	if !slices.Equal(got, want) {
 		t.Errorf("ReadOnlyTools() = %v, want %v", got, want)
 	}
@@ -103,5 +103,23 @@ func TestServerRegistersEveryDefinedTool(t *testing.T) {
 		if def.register == nil {
 			t.Errorf("tool %q would not have been registered", def.tool.Name)
 		}
+	}
+}
+
+func TestSharedStartupValidation(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultWindow = "invalid"
+	cfg.DefaultProvider = "gitlab"
+	if _, err := New(cfg); err != nil {
+		t.Fatalf("unused defaults blocked server: %v", err)
+	}
+	cfg.PerPage = 0
+	if _, err := New(cfg); err == nil {
+		t.Fatal("accepted invalid shared page size")
+	}
+	cfg.PerPage = 100
+	cfg.MaxRequests = -1
+	if _, err := New(cfg); err == nil {
+		t.Fatal("accepted invalid shared cap")
 	}
 }

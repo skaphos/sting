@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 sting queries a GitHub or GitLab user's commits over a time window, as a local
-CLI or as an MCP server exposing two read-only tools, `get_commits` and
-`get_repo_activity`. It is
-read-only by design and uses dedicated provider PATs kept separate from ambient
+CLI or as an MCP server exposing four read-only tools: `get_commits`, `get_repo_activity`,
+`get_prs`, and `get_pr_inbox`. GitHub PR activity and the personal inbox are separate
+workflows. It is read-only by design and uses dedicated provider PATs kept separate from ambient
 provider tokens.
 
 ## Agent Resources
@@ -44,11 +44,11 @@ Public packages (importable; the evidence contract — see
 Application layer (internal):
 
 - `cmd/sting/`: thin entrypoint that boots `internal/cli`.
-- `internal/cli/`: Cobra command tree (`query`, `auth`, `init`, `mcp`, `install`,
+- `internal/cli/`: Cobra command tree (`query`, `activity`, `prs`, `inbox`, `auth`, `init`, `mcp`, `install`,
   `uninstall`, `version`) and viper wiring.
 - `internal/commitclient/`: provider client selection shared by CLI and MCP.
-- `internal/mcpserver/`: MCP server; the read-only `get_commits` and
-  `get_repo_activity` tools. Tool definitions live in one slice that both
+- `internal/mcpserver/`: MCP server; the read-only `get_commits`, `get_repo_activity`,
+  `get_prs`, and `get_pr_inbox` tools. Tool definitions live in one slice that both
   registration and `ReadOnlyTools()` derive from (ADR 0010).
 - `internal/mcpinstall/`: per-runtime install adapters (Claude, Codex, OpenCode,
   Grok) with atomic, format-preserving config writes.

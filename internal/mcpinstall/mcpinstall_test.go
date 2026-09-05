@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/skaphos/sting/internal/mcpserver"
 )
 
 // isolateHome points every runtime's user-scope config under a fresh temp dir
@@ -146,3 +148,19 @@ func TestClaudePermissionsSnippet(t *testing.T) {
 }
 
 func manualRuntimes() []string { return []string{"claude", "codex", "opencode", "grok"} }
+
+func TestPRPermissionsUseServerRegistry(t *testing.T) {
+	tools := mcpserver.ReadOnlyTools()
+	snippet, err := ClaudePermissionsSnippet(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range tools {
+		if !strings.Contains(snippet, "mcp__sting__"+name) {
+			t.Errorf("missing permission %s", name)
+		}
+	}
+	if !strings.Contains(snippet, "get_prs") || !strings.Contains(snippet, "get_pr_inbox") {
+		t.Fatal("PR tools missing")
+	}
+}
