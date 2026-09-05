@@ -206,12 +206,12 @@ func TestEnterpriseBaseURLUnaffectedByBudget(t *testing.T) {
 		t.Fatalf("New with budget: %v", err)
 	}
 
-	if plain.gh.BaseURL.String() != budgeted.gh.BaseURL.String() {
+	if plain.gh.BaseURL() != budgeted.gh.BaseURL() {
 		t.Errorf("BaseURL differs with the budget wrapper: %q vs %q",
-			plain.gh.BaseURL, budgeted.gh.BaseURL)
+			plain.gh.BaseURL(), budgeted.gh.BaseURL())
 	}
-	if !strings.Contains(budgeted.gh.BaseURL.String(), "ghe.example.com") {
-		t.Errorf("BaseURL = %q, want the enterprise host preserved", budgeted.gh.BaseURL)
+	if !strings.Contains(budgeted.gh.BaseURL(), "ghe.example.com") {
+		t.Errorf("BaseURL = %q, want the enterprise host preserved", budgeted.gh.BaseURL())
 	}
 }
 

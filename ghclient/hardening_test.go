@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/skaphos/sting/model"
 )
 

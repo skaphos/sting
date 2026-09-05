@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
 	"github.com/skaphos/sting/internal/apibudget"
 )
 
@@ -152,7 +151,7 @@ func (c *countingTransport) counts() (int, map[string]int) {
 func clientWithTransport(t *testing.T, tr http.RoundTripper, perPage int) *Client {
 	t.Helper()
 	return &Client{
-		gh:          github.NewClient(&http.Client{Transport: tr}),
+		gh:          ghWithTransport(tr),
 		perPage:     perPage,
 		concurrency: defaultConcurrency,
 	}
@@ -164,7 +163,7 @@ func budgetedClientWithTransport(t *testing.T, tr http.RoundTripper, perPage, ce
 	t.Helper()
 	budget := apibudget.NewTransport(tr, ceiling)
 	return &Client{
-		gh:          github.NewClient(&http.Client{Transport: budget}),
+		gh:          ghWithTransport(budget),
 		perPage:     perPage,
 		concurrency: defaultConcurrency,
 		budget:      budget,

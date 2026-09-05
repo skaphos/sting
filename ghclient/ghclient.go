@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
 	"github.com/skaphos/sting/model"
@@ -150,10 +150,10 @@ func New(token, baseURL string, perPage int, opts ...Option) (*Client, error) {
 		}
 	}
 
-	// Use a client with an explicit timeout rather than http.DefaultClient (which
-	// go-github's nil default uses) so a stalled request cannot hang a scan and so
-	// the global default client is never mutated. WithAuthToken preserves the
-	// Timeout while wrapping only the transport.
+	// Use a client with an explicit timeout rather than go-github's default
+	// (an http.Client with no timeout) so a stalled request cannot hang a scan
+	// and so the global default client is never mutated. WithHTTPClient copies
+	// the client, preserving the Timeout; WithAuthToken wraps only the transport.
 	httpClient := &http.Client{Timeout: httpTimeout}
 	if c.budgetEnabled {
 		// Wrap the default transport, then let go-github's auth wrapper sit on
@@ -163,16 +163,16 @@ func New(token, baseURL string, perPage int, opts ...Option) (*Client, error) {
 		httpClient.Transport = c.budget
 	}
 
-	gh := github.NewClient(httpClient)
+	ghOpts := []github.ClientOptionsFunc{github.WithHTTPClient(httpClient)}
 	if token != "" {
-		gh = gh.WithAuthToken(token)
+		ghOpts = append(ghOpts, github.WithAuthToken(token))
 	}
 	if baseURL != "" {
-		var err error
-		gh, err = gh.WithEnterpriseURLs(baseURL, baseURL)
-		if err != nil {
-			return nil, fmt.Errorf("configure enterprise URL: %w", err)
-		}
+		ghOpts = append(ghOpts, github.WithEnterpriseURLs(baseURL, baseURL))
+	}
+	gh, err := github.NewClient(ghOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("configure GitHub client: %w", err)
 	}
 	if perPage < 1 {
 		perPage = 100

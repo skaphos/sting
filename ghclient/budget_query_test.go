@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-github/v84/github"
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/model"
 )
@@ -117,7 +116,7 @@ func (q *queryTransport) counts() map[string]int {
 func budgetedQueryClient(tr http.RoundTripper, perPage, ceiling int) *Client {
 	budget := apibudget.NewTransport(tr, ceiling)
 	return &Client{
-		gh:          github.NewClient(&http.Client{Transport: budget}),
+		gh:          ghWithTransport(budget),
 		perPage:     perPage,
 		concurrency: defaultConcurrency,
 		budget:      budget,
