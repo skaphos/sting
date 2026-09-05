@@ -53,8 +53,9 @@ var collectActivity = func(ctx context.Context, cfg config.Config, q model.Activ
 // crash the whole long-lived stdio server; the deferred recover converts it into
 // a tool-level error result.
 //
-// Errors before collection return a Go error. Partial failures return IsError
-// with a nil Go error so the SDK transmits both text and structured evidence.
+	// Errors that prevent producing a schema-shaped ActivityResult return a Go error.
+	// Errors that return a non-zero ActivityResult are surfaced via IsError with a
+	// nil Go error so the SDK transmits both text and structured evidence.
 //
 // A budget or quota stop is deliberately NOT an error — CollectActivity returns
 // a populated result plus a disclosure, and surfacing that as a failure would
