@@ -4,6 +4,13 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1](https://github.com/skaphos/sting/compare/v1.2.0...v1.2.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **mcp:** forward dedicated credential variables during runtime installation ([#155](https://github.com/skaphos/sting/issues/155)) ([fb0afc0](https://github.com/skaphos/sting/commit/fb0afc04045c385c686453b93957512d3ab06e2e))
+
 ## [1.2.0](https://github.com/skaphos/sting/compare/v1.1.0...v1.2.0) (2026-09-05)
 
 
