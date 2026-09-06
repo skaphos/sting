@@ -79,7 +79,7 @@ func upsertTOMLServer(path string, set map[string]any, mode fs.FileMode, addDefa
 		merged[k] = v
 	}
 	if err := addDefaults(merged); err != nil {
-		return err
+		return fmt.Errorf("parse %q: %w", path, err)
 	}
 	block, err := marshalStingBlock(merged)
 	if err != nil {

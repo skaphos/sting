@@ -41,10 +41,24 @@ func credentialEnvConfigured(env map[string]string, forwarded []any) bool {
 	return true
 }
 
+// credentialObjectAt validates shared JSON/TOML settings without assuming a
+// file format. Callers add the config path when reporting errors.
+func credentialObjectAt(entry map[string]any, field string) (map[string]any, error) {
+	raw := entry[field]
+	if raw == nil {
+		return nil, nil
+	}
+	env, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("sting.%s must be an object/table (got %T)", field, raw)
+	}
+	return env, nil
+}
+
 // addCredentialReferences fills missing keys only, preserving explicit tokens,
 // custom references, empty overrides, and unrelated environment settings.
 func addCredentialReferences(entry map[string]any, field, format string) error {
-	env, err := jsonObjectAt(entry, field, "sting")
+	env, err := credentialObjectAt(entry, field)
 	if err != nil {
 		return err
 	}
@@ -67,7 +81,7 @@ func addGrokCredentialReferences(entry map[string]any) error {
 // addCodexCredentialEnv preserves forwarding order and source objects. Explicit
 // env entries also count as configured, so a default cannot shadow a user value.
 func addCodexCredentialEnv(entry map[string]any) error {
-	explicit, err := jsonObjectAt(entry, "env", "sting")
+	explicit, err := credentialObjectAt(entry, "env")
 	if err != nil {
 		return err
 	}

@@ -108,7 +108,7 @@ func (a *claudeAdapter) WriteEntry(path string, e Entry) error {
 		delete(entry, "args")
 	}
 	if err := addCredentialReferences(entry, "env", "${%s:-}"); err != nil {
-		return err
+		return fmt.Errorf("parse %q: %w", path, err)
 	}
 	servers[serverKey] = entry
 	doc["mcpServers"] = servers

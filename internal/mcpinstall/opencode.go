@@ -151,7 +151,7 @@ func (a *opencodeAdapter) WriteEntry(path string, e Entry) error {
 	entry["command"] = argv
 	entry["enabled"] = e.Enabled
 	if err := addCredentialReferences(entry, "environment", "{env:%s}"); err != nil {
-		return err
+		return fmt.Errorf("parse %q: %w", path, err)
 	}
 	servers[serverKey] = entry
 	doc["mcp"] = servers

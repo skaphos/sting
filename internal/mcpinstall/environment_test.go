@@ -153,20 +153,25 @@ func TestCodexCredentialForwardingExtendsExistingList(t *testing.T) {
 }
 
 func TestCredentialForwardingRejectsMalformedSettings(t *testing.T) {
-	cases := []struct{ runtime, seed string }{
-		{"claude", `{"mcpServers":{"sting":{"command":"old","env":"invalid"}}}`},
-		{"opencode", `{"mcp":{"sting":{"command":["old"],"environment":42}}}`},
-		{"grok", "[mcp_servers.sting]\ncommand = 'old'\nenv = 'invalid'\n"},
-		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = 'invalid'\n"},
-		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = [42]\n"},
-		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = [{source = 'remote'}]\n"},
+	cases := []struct{ runtime, seed, wantError string }{
+		{"claude", `{"mcpServers":{"sting":{"command":"old","env":"invalid"}}}`, "sting.env must be an object/table"},
+		{"opencode", `{"mcp":{"sting":{"command":["old"],"environment":42}}}`, "sting.environment must be an object/table"},
+		{"grok", "[mcp_servers.sting]\ncommand = 'old'\nenv = 'invalid'\n", "sting.env must be an object/table"},
+		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv = 'invalid'\n", "sting.env must be an object/table"},
+		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = 'invalid'\n", "sting.env_vars must be an array"},
+		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = [42]\n", "sting.env_vars entries must be names or objects with a nonempty name"},
+		{"codex", "[mcp_servers.sting]\ncommand = 'old'\nenv_vars = [{source = 'remote'}]\n", "sting.env_vars entries must be names or objects with a nonempty name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.runtime, func(t *testing.T) {
 			path := writeTemp(t, "config", tc.seed)
 			r, _ := ByName(tc.runtime)
-			if err := r.WriteEntry(path, Entry{Command: "new"}); err == nil {
+			err := r.WriteEntry(path, Entry{Command: "new"})
+			if err == nil {
 				t.Fatal("malformed environment configuration accepted")
+			}
+			if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), tc.wantError) {
+				t.Errorf("error = %q, want config path %q and %q", err, path, tc.wantError)
 			}
 			data, err := os.ReadFile(path)
 			if err != nil || string(data) != tc.seed {
