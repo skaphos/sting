@@ -18,26 +18,30 @@ func Snippet(runtime string, e Entry) (string, error) {
 	case "claude":
 		return renderJSON(map[string]any{
 			"mcpServers": map[string]any{
-				serverKey: claudeServer{Command: e.Command, Args: e.Args},
+				serverKey: claudeServer{Command: e.Command, Args: e.Args, Env: credentialReferences("${%s:-}")},
 			},
 		})
 	case "codex":
+		var envVars []any
+		for _, name := range credentialEnvNames() {
+			envVars = append(envVars, name)
+		}
 		return renderTOML(map[string]any{
 			"mcp_servers": map[string]any{
-				serverKey: codexServer{Command: e.Command, Args: e.Args},
+				serverKey: codexServer{Command: e.Command, Args: e.Args, EnvVars: envVars},
 			},
 		})
 	case "opencode":
 		argv := append([]string{e.Command}, e.Args...)
 		return renderJSON(map[string]any{
 			"mcp": map[string]any{
-				serverKey: opencodeServer{Type: "local", Command: argv, Enabled: e.Enabled},
+				serverKey: opencodeServer{Type: "local", Command: argv, Enabled: e.Enabled, Environment: credentialReferences("{env:%s}")},
 			},
 		})
 	case "grok":
 		return renderTOML(map[string]any{
 			"mcp_servers": map[string]any{
-				serverKey: grokServer(e),
+				serverKey: grokServer{Command: e.Command, Args: e.Args, Enabled: e.Enabled, Env: credentialReferences("${%s:-}")},
 			},
 		})
 	default:

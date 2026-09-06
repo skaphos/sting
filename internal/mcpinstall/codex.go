@@ -47,8 +47,10 @@ func (a *codexAdapter) ConfigPath(scope Scope) (string, error) {
 
 // codexServer is the typed TOML shape of an mcp_servers entry.
 type codexServer struct {
-	Command string   `toml:"command"`
-	Args    []string `toml:"args,omitempty"`
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args,omitempty"`
+	EnvVars []any             `toml:"env_vars,omitempty"`
+	Env     map[string]string `toml:"env,omitempty"`
 }
 
 func (a *codexAdapter) ReadEntry(path string) (Entry, bool, error) {
@@ -71,7 +73,8 @@ func (a *codexAdapter) ReadEntry(path string) (Entry, bool, error) {
 	if err := decodeTOMLInto(raw, &srv, path, "mcp_servers."+serverKey); err != nil {
 		return Entry{}, false, err
 	}
-	return Entry{Command: srv.Command, Args: srv.Args, Enabled: true}, true, nil
+	return Entry{Command: srv.Command, Args: srv.Args, Enabled: true,
+		CredentialEnvConfigured: credentialEnvConfigured(srv.Env, srv.EnvVars)}, true, nil
 }
 
 func (a *codexAdapter) WriteEntry(path string, e Entry) error {
@@ -81,7 +84,7 @@ func (a *codexAdapter) WriteEntry(path string, e Entry) error {
 	} else {
 		set["args"] = nil
 	}
-	return upsertTOMLServer(path, set, 0o644)
+	return upsertTOMLServer(path, set, 0o644, addCodexCredentialEnv)
 }
 
 func (a *codexAdapter) RemoveEntry(path string) (bool, error) {

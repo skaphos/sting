@@ -66,13 +66,13 @@ func (a *grokAdapter) ConfigPath(scope Scope) (string, error) {
 }
 
 // grokServer is the typed TOML shape of a Grok mcp_servers entry. Grok requires
-// an explicit enabled boolean. Any extra keys a user adds (env with a token,
-// timeout, ...) are not modeled here on purpose: WriteEntry merges into the raw
-// table so they are preserved rather than round-tripped through this struct.
+// an explicit enabled boolean. WriteEntry merges defaults into the raw table
+// so user environment overrides and extra keys survive reinstallation.
 type grokServer struct {
-	Command string   `toml:"command"`
-	Args    []string `toml:"args,omitempty"`
-	Enabled bool     `toml:"enabled"`
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args,omitempty"`
+	Enabled bool              `toml:"enabled"`
+	Env     map[string]string `toml:"env,omitempty"`
 }
 
 func (a *grokAdapter) ReadEntry(path string) (Entry, bool, error) {
@@ -95,7 +95,8 @@ func (a *grokAdapter) ReadEntry(path string) (Entry, bool, error) {
 	if err := decodeTOMLInto(raw, &srv, path, "mcp_servers."+serverKey); err != nil {
 		return Entry{}, false, err
 	}
-	return Entry(srv), true, nil
+	return Entry{Command: srv.Command, Args: srv.Args, Enabled: srv.Enabled,
+		CredentialEnvConfigured: credentialEnvConfigured(srv.Env, nil)}, true, nil
 }
 
 func (a *grokAdapter) WriteEntry(path string, e Entry) error {
@@ -105,7 +106,7 @@ func (a *grokAdapter) WriteEntry(path string, e Entry) error {
 	} else {
 		set["args"] = nil
 	}
-	return upsertTOMLServer(path, set, 0o644)
+	return upsertTOMLServer(path, set, 0o644, addGrokCredentialReferences)
 }
 
 func (a *grokAdapter) RemoveEntry(path string) (bool, error) {

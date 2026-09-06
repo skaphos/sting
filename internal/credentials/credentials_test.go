@@ -308,6 +308,7 @@ func TestNewWithIsolatedHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("GH_CONFIG_DIR", "")
 
 	s, err := New()
@@ -315,25 +316,25 @@ func TestNewWithIsolatedHome(t *testing.T) {
 		t.Fatalf("New() with isolated HOME failed: %v", err)
 	}
 
-	// Saving must not error. Depending on whether a working OS keyring is
-	// available on the host, the token lands either in the keyring
-	// (usedInsecure=false) or in the plaintext file (usedInsecure=true).
+	// HOME does not isolate the OS keychain. Verify constructor wiring without
+	// calling it, then replace the backend before saving a dummy credential.
+	backend := s.(*store)
+	if _, ok := backend.kr.(defaultKeyring); !ok {
+		t.Fatal("New did not configure the default keyring backend")
+	}
+	backend.kr = failingKeyring{}
 	tok := Token{Type: TokenTypeOAuth, AccessToken: "new-home-test"}
 	usedInsecure, err := s.Save(context.Background(), ProviderGitHub, "github.com", tok, false)
 	if err != nil {
 		t.Fatalf("Save after New() failed: %v", err)
 	}
 
-	// Only the file backend is deterministic across platforms and CI: some
-	// keyrings (notably headless Windows wincred) report success on Set but
-	// cannot read the value back. When the file fallback was used we can assert
-	// the full roundtrip; the keyring Load path is covered by
-	// TestSaveKeyringSuccessCreatesMarker.
-	if usedInsecure {
-		got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
-		if err != nil || got.AccessToken != tok.AccessToken || src != SourceFile {
-			t.Errorf("file roundtrip after New() failed: got=%v src=%s err=%v", got, src, err)
-		}
+	if !usedInsecure {
+		t.Fatal("isolated test must use file storage")
+	}
+	got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+	if err != nil || got.AccessToken != tok.AccessToken || src != SourceFile {
+		t.Errorf("file roundtrip after New() failed: got=%v src=%s err=%v", got, src, err)
 	}
 }
 
