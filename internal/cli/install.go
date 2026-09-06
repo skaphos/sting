@@ -207,5 +207,5 @@ func desiredInstallEntry(override string) (mcpinstall.Entry, error) {
 		}
 		bin = exe
 	}
-	return mcpinstall.Entry{Command: bin, Args: []string{"mcp"}, Enabled: true}, nil
+	return mcpinstall.Entry{Command: bin, Args: []string{"mcp"}, Enabled: true, CredentialEnvConfigured: true}, nil
 }

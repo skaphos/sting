@@ -71,9 +71,10 @@ func (a *opencodeAdapter) ConfigPath(scope Scope) (string, error) {
 // opencodeServer is the typed JSON shape of an mcp entry. OpenCode's command is
 // a single argv array, not a command string plus separate args.
 type opencodeServer struct {
-	Type    string   `json:"type"`
-	Command []string `json:"command"`
-	Enabled bool     `json:"enabled"`
+	Type        string            `json:"type"`
+	Command     []string          `json:"command"`
+	Enabled     bool              `json:"enabled"`
+	Environment map[string]string `json:"environment,omitempty"`
 }
 
 // checkJsonc refuses to act on .jsonc paths or .json paths whose .jsonc sibling
@@ -120,7 +121,8 @@ func (a *opencodeAdapter) ReadEntry(path string) (Entry, bool, error) {
 	if len(srv.Command) == 0 {
 		return Entry{}, false, fmt.Errorf("parse %q: mcp.%s.command is empty", path, serverKey)
 	}
-	return Entry{Command: srv.Command[0], Args: srv.Command[1:], Enabled: srv.Enabled}, true, nil
+	return Entry{Command: srv.Command[0], Args: srv.Command[1:], Enabled: srv.Enabled,
+		CredentialEnvConfigured: credentialEnvConfigured(srv.Environment, nil)}, true, nil
 }
 
 func (a *opencodeAdapter) WriteEntry(path string, e Entry) error {
@@ -148,6 +150,9 @@ func (a *opencodeAdapter) WriteEntry(path string, e Entry) error {
 	entry["type"] = "local"
 	entry["command"] = argv
 	entry["enabled"] = e.Enabled
+	if err := addCredentialReferences(entry, "environment", "{env:%s}"); err != nil {
+		return fmt.Errorf("parse %q: %w", path, err)
+	}
 	servers[serverKey] = entry
 	doc["mcp"] = servers
 	return writeJSONDoc(path, doc, 0o644)

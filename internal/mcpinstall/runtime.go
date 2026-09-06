@@ -46,6 +46,9 @@ type Entry struct {
 	Command string
 	Args    []string
 	Enabled bool
+	// CredentialEnvConfigured reports configuration coverage, not whether the
+	// runtime currently has a token. Explicit user overrides count as configured.
+	CredentialEnvConfigured bool
 }
 
 // ErrScopeUnsupported is returned by adapters that do not support a given Scope

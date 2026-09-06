@@ -54,8 +54,9 @@ func (a *claudeAdapter) ConfigPath(scope Scope) (string, error) {
 
 // claudeServer is the typed JSON shape of an mcpServers entry.
 type claudeServer struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 func (a *claudeAdapter) ReadEntry(path string) (Entry, bool, error) {
@@ -78,7 +79,8 @@ func (a *claudeAdapter) ReadEntry(path string) (Entry, bool, error) {
 	if err := decodeJSONInto(raw, &srv, path, "mcpServers."+serverKey); err != nil {
 		return Entry{}, false, err
 	}
-	return Entry{Command: srv.Command, Args: srv.Args, Enabled: true}, true, nil
+	return Entry{Command: srv.Command, Args: srv.Args, Enabled: true,
+		CredentialEnvConfigured: credentialEnvConfigured(srv.Env, nil)}, true, nil
 }
 
 func (a *claudeAdapter) WriteEntry(path string, e Entry) error {
@@ -104,6 +106,9 @@ func (a *claudeAdapter) WriteEntry(path string, e Entry) error {
 		entry["args"] = e.Args
 	} else {
 		delete(entry, "args")
+	}
+	if err := addCredentialReferences(entry, "env", "${%s:-}"); err != nil {
+		return fmt.Errorf("parse %q: %w", path, err)
 	}
 	servers[serverKey] = entry
 	doc["mcpServers"] = servers

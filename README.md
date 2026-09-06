@@ -208,6 +208,35 @@ using the same `STING_` names as the local binary.
 annotation), the Claude snippet also prints a paste-ready `permissions.allow`
 block that auto-approves the tool — safe to accept without per-call prompts.
 
+Installation and `install --manual` forward `STING_TOKEN` and
+`STING_GITLAB_TOKEN` by default, using each runtime's native configuration:
+
+| Runtime | Credential forwarding |
+| --- | --- |
+| Codex | `env_vars = ["STING_TOKEN", "STING_GITLAB_TOKEN"]` |
+| Claude Code | `env` entries using `${STING_TOKEN:-}` / `${STING_GITLAB_TOKEN:-}` |
+| Grok | `env` entries using `${STING_TOKEN:-}` / `${STING_GITLAB_TOKEN:-}` |
+| OpenCode | `environment` entries using `{env:STING_TOKEN}` / `{env:STING_GITLAB_TOKEN}` |
+
+These are variable references, not token values: the installer never copies
+credentials from its own environment into runtime configuration. Reinstalling
+fills missing defaults while preserving explicit environment values, custom
+references, and existing Codex forwarding sources. Unset variables remain
+optional, so stored Sting OAuth credentials or config-file PATs still work.
+
+The variables must exist in the **agent runtime's environment when it starts**.
+A token available in a terminal or an agent's shell tool is not proof that the
+separate MCP launcher has it. GUI launches may not load `.zshrc`; launch the
+runtime from an environment containing the exported variables, or use Sting's
+credential store. After upgrading Sting, rerun `sting install` for the selected
+runtimes and restart their MCP servers to apply the forwarding defaults.
+
+The syntax follows the runtime documentation:
+[Codex](https://developers.openai.com/codex/mcp/),
+[Claude Code](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcpjson),
+[Grok](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/07-mcp-servers.md#example-configurations),
+and [OpenCode](https://opencode.ai/docs/config/#env-vars).
+
 Then ask the agent naturally:
 
 > Give me all the commits of `mfacenet` in the last week and tell me what he's

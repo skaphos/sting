@@ -43,7 +43,7 @@ type byteSpan struct{ start, end int }
 // upsertTOMLServer inserts or replaces sting's table in path with the keys in
 // set (nil-valued keys are deleted), preserving all other bytes and any extra
 // keys the user added to the sting table itself.
-func upsertTOMLServer(path string, set map[string]any, mode fs.FileMode) error {
+func upsertTOMLServer(path string, set map[string]any, mode fs.FileMode, addDefaults func(map[string]any) error) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -77,6 +77,9 @@ func upsertTOMLServer(path string, set map[string]any, mode fs.FileMode) error {
 			continue
 		}
 		merged[k] = v
+	}
+	if err := addDefaults(merged); err != nil {
+		return fmt.Errorf("parse %q: %w", path, err)
 	}
 	block, err := marshalStingBlock(merged)
 	if err != nil {
