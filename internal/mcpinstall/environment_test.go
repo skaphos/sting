@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -170,7 +171,7 @@ func TestCredentialForwardingRejectsMalformedSettings(t *testing.T) {
 			if err == nil {
 				t.Fatal("malformed environment configuration accepted")
 			}
-			if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), tc.wantError) {
+			if !strings.Contains(err.Error(), strconv.Quote(path)) || !strings.Contains(err.Error(), tc.wantError) {
 				t.Errorf("error = %q, want config path %q and %q", err, path, tc.wantError)
 			}
 			data, err := os.ReadFile(path)
