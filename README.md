@@ -588,6 +588,11 @@ go doc ./ghclient Client    # a specific type
 go doc ./gitlabclient Client
 ```
 
+## Security
+
+Report suspected vulnerabilities privately using the [security policy](SECURITY.md).
+Please do not use public issues for security reports.
+
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — notable changes.
