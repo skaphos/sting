@@ -1,0 +1,11 @@
+apiVersion: repokeeper/v1
+kind: RepoMetadata
+repo_id: github.com/skaphos/sting
+name: Sting
+labels:
+    kind: tool
+    org: skaphos
+    role: source-control-activity
+    tool: sting
+entrypoints:
+    readme: README.md
