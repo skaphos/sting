@@ -131,7 +131,7 @@ tasks:
     cmds:
       - go clean ./...
       - go clean -testcache
-      - '{{if eq OS "windows"}}powershell -NoProfile -Command "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force sting.exe,sting,coverage.out -ErrorAction SilentlyContinue"{{else}}rm -rf dist sting coverage.out{{end}}'
+      - '{{if eq OS "windows"}}powershell -NoProfile -Command "Remove-Item -Recurse -Force dist,bin -ErrorAction SilentlyContinue; Remove-Item -Force sting.exe,sting,coverage.out -ErrorAction SilentlyContinue"{{else}}rm -rf dist bin sting coverage.out{{end}}'
 
   ci:
     desc: Run standard CI workflow locally
