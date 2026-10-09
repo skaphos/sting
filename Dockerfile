@@ -17,7 +17,7 @@
 # Distroless static: no shell, no package manager, no libc to keep patched, and
 # it already carries CA certificates for HTTPS to the provider APIs. Pinned by
 # digest so a rebuild cannot silently pick up a different base.
-FROM gcr.io/distroless/static@sha256:f2ea2709ac8db56323cbd7d014277f32cb572d9ea124b0076f7aafe5980678fe
+FROM gcr.io/distroless/static@sha256:58133991db06659feaabe0f4e97a35cebf15ef4ea08f8a4c6d2ee5f75e4aa6a0
 
 # Set by buildx for each platform in the manifest.
 ARG TARGETPLATFORM
