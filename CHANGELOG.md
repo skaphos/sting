@@ -4,6 +4,18 @@ All notable changes to sting are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/skaphos/sting/compare/v1.2.1...v1.3.0) (2026-10-12)
+
+
+### Features
+
+* **cli:** report credential source with --verbose ([#45](https://github.com/skaphos/sting/issues/45)) ([#163](https://github.com/skaphos/sting/issues/163)) ([ec12558](https://github.com/skaphos/sting/commit/ec12558451ae279ec974f8e5d659384be6a688d7))
+
+
+### Bug Fixes
+
+* **release:** drop deprecated cask postflight quarantine hook ([#161](https://github.com/skaphos/sting/issues/161)) ([fe35bc8](https://github.com/skaphos/sting/commit/fe35bc8b1e5eeeca1612339e571d1b772ec29d47))
+
 ## [1.2.1](https://github.com/skaphos/sting/compare/v1.2.0...v1.2.1) (2026-09-06)
 
 
