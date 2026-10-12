@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
 func TestPRMCPRepoResolution(t *testing.T) {
 	old := collectPRs
 	t.Cleanup(func() { collectPRs = old })
-	collectPRs = func(_ context.Context, _ config.Config, q model.PRQuery) (model.PRResult, error) {
+	collectPRs = func(_ context.Context, _ config.Config, q model.PRQuery, _ ...commitclient.Option) (model.PRResult, error) {
 		if q.Author != "" || q.Scope != model.ScopeRepos || q.Since.IsZero() || q.State != model.PRStateAll {
 			t.Errorf("query: %+v", q)
 		}

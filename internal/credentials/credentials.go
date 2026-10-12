@@ -49,6 +49,12 @@ import (
 // that it falls back to the plaintext file (or errors when secureOnly is set).
 var errKeyringDisabled = errors.New("keyring backend disabled")
 
+// ErrNotFound marks a Load that found no credential at all. Callers branch on it
+// with errors.Is to tell a genuine absence apart from a stored credential that
+// exists but could not be read (locked keyring, unreadable file) — the case
+// worth surfacing rather than quietly treating as anonymous.
+var ErrNotFound = errors.New("no credential found")
+
 // Provider identifies a source control system.
 type Provider string
 
@@ -457,7 +463,7 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 		return Token{}, "", fmt.Errorf("no readable credential for %s/%s (keyring unavailable): %w", provider, host, keyringErr)
 	}
 
-	return Token{}, "", fmt.Errorf("no credential found for %s/%s", provider, host)
+	return Token{}, "", fmt.Errorf("%w for %s/%s", ErrNotFound, provider, host)
 }
 
 // Delete implements Store.

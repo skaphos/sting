@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -15,7 +16,7 @@ func TestPRInboxCLIConfig(t *testing.T) {
 	v.Set("provider", "gitlab")
 	old := collectPRInbox
 	t.Cleanup(func() { collectPRInbox = old })
-	collectPRInbox = func(_ context.Context, _ config.Config, q model.PRInboxQuery) (model.PRInboxResult, error) {
+	collectPRInbox = func(_ context.Context, _ config.Config, q model.PRInboxQuery, _ ...commitclient.Option) (model.PRInboxResult, error) {
 		if q.User != "octocat" || q.Provider != model.ProviderGitHub || q.Draft != model.PRDraftExclude {
 			t.Errorf("query: %+v", q)
 		}

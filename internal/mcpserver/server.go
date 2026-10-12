@@ -6,6 +6,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,6 +44,23 @@ type GetCommitsInput struct {
 // handler holds the dependencies shared across tool calls.
 type handler struct {
 	cfg config.Config
+	// diag receives per-call credential reports; nil keeps the server silent.
+	diag io.Writer
+}
+
+// report returns the option that sends one tool call's credential report to
+// the server's diagnostics writer.
+func (h *handler) report() commitclient.Option {
+	return commitclient.WithCredentialReport(h.diag)
+}
+
+// Option configures New.
+type Option func(*handler)
+
+// WithDiagnostics sends one credential report line per tool call to w. It must
+// be stderr (or a test buffer), never stdout: stdout is the protocol stream.
+func WithDiagnostics(w io.Writer) Option {
+	return func(h *handler) { h.diag = w }
 }
 
 // toolDefinition pairs a tool's declaration with the call that registers it.
@@ -112,7 +130,7 @@ func toolDefinitions() []toolDefinition {
 
 // New builds an MCP server exposing sting's read-only tools, configured from
 // cfg.
-func New(cfg config.Config) (*mcp.Server, error) {
+func New(cfg config.Config, opts ...Option) (*mcp.Server, error) {
 	if cfg.PerPage < 1 || cfg.PerPage > 100 {
 		return nil, fmt.Errorf("per_page must be 1-100")
 	}
@@ -120,6 +138,9 @@ func New(cfg config.Config) (*mcp.Server, error) {
 		return nil, fmt.Errorf("max_requests must be >= 0")
 	}
 	h := &handler{cfg: cfg}
+	for _, opt := range opts {
+		opt(h)
+	}
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "sting",
@@ -159,8 +180,8 @@ func boolPtr(b bool) *bool { return &b }
 // getCommits) so tests can substitute a panic-inducing implementation to
 // exercise the getCommits panic-recovery path without depending on a real
 // provider client.
-var collectCommits = func(ctx context.Context, cfg config.Config, q model.Query) (model.Result, error) {
-	client, err := commitclient.New(cfg, q)
+var collectCommits = func(ctx context.Context, cfg config.Config, q model.Query, opts ...commitclient.Option) (model.Result, error) {
+	client, err := commitclient.New(cfg, q, opts...)
 	if err != nil {
 		return model.Result{}, err
 	}
@@ -231,7 +252,7 @@ func (h *handler) getCommits(ctx context.Context, _ *mcp.CallToolRequest, in Get
 		return nil, model.Result{}, rerr
 	}
 
-	result, colErr := collectCommits(ctx, h.cfg, q)
+	result, colErr := collectCommits(ctx, h.cfg, q, h.report())
 	if colErr != nil {
 		if len(result.Commits) > 0 || len(result.Skipped) > 0 {
 			md := render.Markdown(result)

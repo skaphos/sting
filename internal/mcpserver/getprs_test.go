@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -26,14 +27,16 @@ func TestPRToolPartialAndPanic(t *testing.T) {
 	original := collectPRs
 	t.Cleanup(func() { collectPRs = original })
 	h := &handler{cfg: config.Default()}
-	collectPRs = func(_ context.Context, _ config.Config, q model.PRQuery) (model.PRResult, error) {
+	collectPRs = func(_ context.Context, _ config.Config, q model.PRQuery, _ ...commitclient.Option) (model.PRResult, error) {
 		return model.PRResult{SchemaVersion: model.PRSchemaVersion, Query: q, PRs: []model.PRActivityEntry{}, Truncated: true}, errors.New("fixture failure")
 	}
 	result, out, err := h.getPRs(context.Background(), nil, GetPRsInput{Author: "octocat"})
 	if err != nil || !result.IsError || out.SchemaVersion == "" {
 		t.Fatalf("partial lost: %v %+v", err, out)
 	}
-	collectPRs = func(context.Context, config.Config, model.PRQuery) (model.PRResult, error) { panic("secret-token") }
+	collectPRs = func(context.Context, config.Config, model.PRQuery, ...commitclient.Option) (model.PRResult, error) {
+		panic("secret-token")
+	}
 	result, _, err = h.getPRs(context.Background(), nil, GetPRsInput{Author: "octocat"})
 	if err != nil || !result.IsError {
 		t.Fatal("panic not recovered")

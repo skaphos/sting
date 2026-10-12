@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -27,7 +28,7 @@ func TestActivityUsesGitHubWithGitLabDefault(t *testing.T) {
 	}
 	old := collectCommits
 	t.Cleanup(func() { collectCommits = old })
-	collectCommits = func(_ context.Context, _ config.Config, q model.Query) (model.Result, error) {
+	collectCommits = func(_ context.Context, _ config.Config, q model.Query, _ ...commitclient.Option) (model.Result, error) {
 		if q.Provider != model.ProviderGitLab {
 			t.Fatalf("commit query provider = %s", q.Provider)
 		}

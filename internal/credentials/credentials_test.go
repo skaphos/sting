@@ -905,3 +905,29 @@ func TestSaveKeyringSuccessReturnsMarkerWriteError(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// TestLoadErrNotFoundOnlyForGenuineMiss pins the contract callers rely on to
+// report a failed lookup: a true absence wraps ErrNotFound, while an unreadable
+// keyring (with or without an on-disk marker) must not.
+func TestLoadErrNotFoundOnlyForGenuineMiss(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "")
+	ctx := context.Background()
+
+	if _, _, err := WithFilePath(t.TempDir()).Load(ctx, ProviderGitHub, "github.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("genuine miss: want ErrNotFound, got %v", err)
+	}
+
+	if _, _, err := WithKeyringForTest(lockedKeyring{}, t.TempDir()).Load(ctx, ProviderGitHub, "github.com"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("locked keyring without marker: want a non-ErrNotFound error, got %v", err)
+	}
+
+	withMarker := WithKeyringForTest(lockedKeyring{}, t.TempDir())
+	if _, err := withMarker.Save(ctx, ProviderGitHub, "github.com", Token{Type: TokenTypeOAuth, AccessToken: "secret"}, false); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, _, err := withMarker.Load(ctx, ProviderGitHub, "github.com"); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("locked keyring with marker: want a non-ErrNotFound error, got %v", err)
+	}
+}

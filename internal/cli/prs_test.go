@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -32,7 +33,7 @@ func TestPRCLIEmitsPartialJSON(t *testing.T) {
 	seedValidConfig(t)
 	original := collectPRActivity
 	t.Cleanup(func() { collectPRActivity = original })
-	collectPRActivity = func(_ context.Context, _ config.Config, q model.PRQuery) (model.PRResult, error) {
+	collectPRActivity = func(_ context.Context, _ config.Config, q model.PRQuery, _ ...commitclient.Option) (model.PRResult, error) {
 		return model.PRResult{SchemaVersion: model.PRSchemaVersion, Query: q, PRs: []model.PRActivityEntry{}, Truncated: true, Disclosures: []model.PRDisclosure{{Kind: "provider-error", Reason: "fixture failure"}}}, errors.New("fixture failure")
 	}
 	cmd, out, _ := newCmd()

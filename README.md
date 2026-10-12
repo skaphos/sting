@@ -157,6 +157,51 @@ export STING_TOKEN=ghp_xxx
 export STING_GITLAB_TOKEN=glpat_xxx
 ```
 
+### Which credential a query uses
+
+For each provider and host, sting picks the most explicit credential available
+([ADR 0008](docs/adr/0008-oauth-app-authentication.md)):
+
+1. **Dedicated PAT**: `--token` / `STING_TOKEN` / config `token` (GitLab:
+   `--gitlab-token` / `STING_GITLAB_TOKEN` / `gitlab_token`). An empty value
+   counts as unset.
+2. **Stored credential** for that host, saved by `sting auth`: system keyring
+   first, then sting's own `hosts.yml`.
+3. **Anonymous**: public data only. Private repositories are silently absent.
+
+sting never reads `GITHUB_TOKEN`, `GITLAB_TOKEN`, or the `gh`/`glab` stored
+logins on its own. One opt-in exception currently exists:
+`STING_ALLOW_AMBIENT_GITHUB_TOKEN=true` lets sting fall back to `GH_TOKEN` /
+`GITHUB_TOKEN` or the `gh` config file when no stored sting credential exists
+for a GitHub host. This opt-in conflicts with sting's dedicated-credential
+policy ([ADR 0002](docs/adr/0002-dedicated-pat-via-viper.md)) and is
+**deprecated and scheduled for removal**
+([#164](https://github.com/skaphos/sting/issues/164)). Do not rely on it.
+
+The host comes from the base URL (`base_url` / `gitlab_base_url`), so an OAuth
+login for `ghe.example.com` is never used for `github.com`, and the reverse.
+
+To see which credential a run used, add `--verbose` (or set `STING_VERBOSE=true`,
+or `verbose: true` in the config file). sting then writes one line per
+credential lookup to **stderr**. It never writes the token itself, and it leaves
+stdout and JSON output unchanged:
+
+```text
+$ sting query --author octocat --verbose
+sting: credential: github github.com: stored oauth token (keyring)
+```
+
+| Reported source | Meaning |
+| --- | --- |
+| `dedicated PAT` | `token` / `gitlab_token` from a flag, the environment, or the config file |
+| `stored oauth token (keyring)` / `stored pat (keyring)` | saved by `sting auth`, read from the system keyring |
+| `stored oauth token (file)` / `stored pat (file)` | saved by `sting auth`, read from sting's `hosts.yml` |
+| `ambient token from environment (opt-in)` / `ambient token from gh config (opt-in)` | only with `STING_ALLOW_AMBIENT_GITHUB_TOKEN` |
+| `anonymous` | nothing configured or stored for this host |
+| `anonymous (stored-credential lookup failed: …)` | a stored credential could not be read (for example, a locked keyring), so the query ran anonymously |
+
+The line is a human diagnostic, not a stable format. Do not parse it.
+
 See [docs/oauth-app-registration.md](docs/oauth-app-registration.md) for how to
 create the required OAuth applications and for important notes about trust,
 governance, and when organizations should register their own apps instead of
@@ -230,6 +275,32 @@ separate MCP launcher has it. GUI launches may not load `.zshrc`; launch the
 runtime from an environment containing the exported variables, or use Sting's
 credential store. After upgrading Sting, rerun `sting install` for the selected
 runtimes and restart their MCP servers to apply the forwarding defaults.
+
+### Which credential the MCP server uses
+
+Every tool call (`get_commits`, `get_repo_activity`, `get_prs`, and
+`get_pr_inbox`) resolves its credential with the
+[same precedence as the CLI](#which-credential-a-query-uses), using the server
+process's own environment and config file:
+
+- A PAT that reaches the server, whether through `STING_TOKEN` /
+  `STING_GITLAB_TOKEN` in the runtime's environment or through `token` /
+  `gitlab_token` in sting's config file, is **server-wide**. It applies to every
+  tool call for that provider and overrides an OAuth login you made with
+  `sting auth`.
+- To have the server use your OAuth login instead, leave the forwarded variable
+  unset (or empty) in the runtime's environment and remove the config-file
+  key. The installer's references (`${STING_TOKEN:-}`, `env_vars`, and so on)
+  expand to nothing when the variable is unset, so they do not block OAuth.
+- Ambient tokens are not used unless `STING_ALLOW_AMBIENT_GITHUB_TOKEN` is set
+  in the server's environment.
+
+To confirm what a running server uses, enable verbose output for it. Add
+`verbose: true` to sting's config file, or set `STING_VERBOSE=true` in the
+runtime's environment for the server, then restart the server. Each tool call
+then writes one `sting: credential: …` line to the server's stderr, which agent
+runtimes keep in their MCP server logs. Stdout carries only the MCP protocol and
+is unaffected.
 
 The syntax follows the runtime documentation:
 [Codex](https://developers.openai.com/codex/mcp/),
@@ -560,6 +631,7 @@ directory, or pointed at explicitly with `--config path.yaml`.
 | `max_diff_bytes`   | `STING_MAX_DIFF_BYTES`  | (`--max-diff-bytes`) | `60000`    | per-commit patch byte cap                |
 | `max_requests`     | `STING_MAX_REQUESTS`    | (`--max-requests`)   | `500`      | provider request cap (0 = unlimited)     |
 | `include_prs`      | `STING_INCLUDE_PRS`     | (`--prs`)            | `false`    | discover open-PR branch commits (GitHub) |
+| `verbose`          | `STING_VERBOSE`         | `--verbose`          | `false`    | report the credential source on stderr   |
 
 Keys in parentheses are per-query request flags that override the resolved
 default for a single invocation. See `config.example.yaml`.

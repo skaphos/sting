@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -13,7 +14,7 @@ func TestPRCLIRepoResolution(t *testing.T) {
 	seedValidConfig(t)
 	old := collectPRActivity
 	t.Cleanup(func() { collectPRActivity = old })
-	collectPRActivity = func(_ context.Context, _ config.Config, q model.PRQuery) (model.PRResult, error) {
+	collectPRActivity = func(_ context.Context, _ config.Config, q model.PRQuery, _ ...commitclient.Option) (model.PRResult, error) {
 		if q.Author != "" || q.Scope != model.ScopeRepos || q.Since.IsZero() || q.Until.IsZero() || q.State != model.PRStateAll {
 			t.Errorf("query: %+v", q)
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -21,7 +22,9 @@ func activityHandler() *handler {
 func swapCollectActivity(t *testing.T, fn func(context.Context, config.Config, model.ActivityQuery) (model.ActivityResult, error)) {
 	t.Helper()
 	prev := collectActivity
-	collectActivity = fn
+	collectActivity = func(ctx context.Context, cfg config.Config, q model.ActivityQuery, _ ...commitclient.Option) (model.ActivityResult, error) {
+		return fn(ctx, cfg, q)
+	}
 	t.Cleanup(func() { collectActivity = prev })
 }
 

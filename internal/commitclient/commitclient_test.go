@@ -69,8 +69,8 @@ func TestResolveGitHubTokenPrefersConfigToken(t *testing.T) {
 	cfg := config.Default()
 	cfg.Token = "explicit-gh-token"
 
-	if got := resolveGitHubToken(cfg); got != cfg.Token {
-		t.Fatalf("resolveGitHubToken=%q, want %q", got, cfg.Token)
+	if got, r := resolveGitHubToken(cfg); got != cfg.Token || r.source != sourceDedicated {
+		t.Fatalf("resolveGitHubToken=%q (%s), want %q (dedicated)", got, r.source, cfg.Token)
 	}
 }
 
@@ -78,8 +78,8 @@ func TestResolveGitLabTokenPrefersConfigToken(t *testing.T) {
 	cfg := config.Default()
 	cfg.GitLabToken = "explicit-gl-token"
 
-	if got := resolveGitLabToken(cfg); got != cfg.GitLabToken {
-		t.Fatalf("resolveGitLabToken=%q, want %q", got, cfg.GitLabToken)
+	if got, r := resolveGitLabToken(cfg); got != cfg.GitLabToken || r.source != sourceDedicated {
+		t.Fatalf("resolveGitLabToken=%q (%s), want %q (dedicated)", got, r.source, cfg.GitLabToken)
 	}
 }
 

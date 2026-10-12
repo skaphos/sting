@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -126,7 +127,7 @@ func TestGetCommitsSuccess(t *testing.T) {
 func TestGetCommitsKeepsPartialCollectorResult(t *testing.T) {
 	orig := collectCommits
 	t.Cleanup(func() { collectCommits = orig })
-	collectCommits = func(context.Context, config.Config, model.Query) (model.Result, error) {
+	collectCommits = func(context.Context, config.Config, model.Query, ...commitclient.Option) (model.Result, error) {
 		return model.Result{
 			SchemaVersion: model.SchemaVersion,
 			Author:        "alice",
@@ -210,7 +211,7 @@ func TestGetCommitsDefaultsDiffsOff(t *testing.T) {
 	t.Cleanup(func() { collectCommits = orig })
 
 	var gotQuery model.Query
-	collectCommits = func(_ context.Context, _ config.Config, q model.Query) (model.Result, error) {
+	collectCommits = func(_ context.Context, _ config.Config, q model.Query, _ ...commitclient.Option) (model.Result, error) {
 		gotQuery = q
 		return model.Result{Author: q.Author}, nil
 	}
@@ -379,7 +380,7 @@ func TestGetCommitsCollectError(t *testing.T) {
 func TestGetCommitsPanicRecovered(t *testing.T) {
 	orig := collectCommits
 	t.Cleanup(func() { collectCommits = orig })
-	collectCommits = func(context.Context, config.Config, model.Query) (model.Result, error) {
+	collectCommits = func(context.Context, config.Config, model.Query, ...commitclient.Option) (model.Result, error) {
 		panic("simulated dependency panic")
 	}
 
@@ -414,7 +415,7 @@ func TestGetCommitsExplicitFalseOverridesServerDefault(t *testing.T) {
 	t.Cleanup(func() { collectCommits = orig })
 
 	var gotQuery model.Query
-	collectCommits = func(_ context.Context, _ config.Config, q model.Query) (model.Result, error) {
+	collectCommits = func(_ context.Context, _ config.Config, q model.Query, _ ...commitclient.Option) (model.Result, error) {
 		gotQuery = q
 		return model.Result{Author: q.Author}, nil
 	}

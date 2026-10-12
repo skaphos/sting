@@ -121,7 +121,7 @@ func runQuery(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	client, err := commitclient.New(cfg, q)
+	client, err := commitclient.New(cfg, q, commitclient.WithCredentialReport(diagnostics(cmd)))
 	if err != nil {
 		return err
 	}

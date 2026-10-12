@@ -38,8 +38,8 @@ type GetRepoActivityInput struct {
 // collectActivity resolves an activity client and gathers the result. It is a
 // package variable so tests can substitute a panic-inducing implementation to
 // exercise the recovery path without a real provider client.
-var collectActivity = func(ctx context.Context, cfg config.Config, q model.ActivityQuery) (model.ActivityResult, error) {
-	client, err := commitclient.NewActivity(cfg, q)
+var collectActivity = func(ctx context.Context, cfg config.Config, q model.ActivityQuery, opts ...commitclient.Option) (model.ActivityResult, error) {
+	client, err := commitclient.NewActivity(cfg, q, opts...)
 	if err != nil {
 		return model.ActivityResult{}, err
 	}
@@ -105,7 +105,7 @@ func (h *handler) getRepoActivity(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, model.ActivityResult{}, rerr
 	}
 
-	result, cerr := collectActivity(ctx, h.cfg, q)
+	result, cerr := collectActivity(ctx, h.cfg, q, h.report())
 	if cerr != nil && result.SchemaVersion == "" {
 		return nil, model.ActivityResult{}, cerr
 	}
