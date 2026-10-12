@@ -120,7 +120,9 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
 1. **Given** the README's agent-integration section, **When** a reader looks up credential
    resolution for the MCP server, **Then** it states that every tool uses the same precedence as
    the CLI (dedicated PAT, then stored OAuth login for the target host, then anonymous) and that
-   ambient provider tokens are never used.
+   ambient provider tokens are not used by default. They are used only under the existing
+   `STING_ALLOW_AMBIENT_GITHUB_TOKEN` opt-in, which the README must name (consistent with
+   FR-002 and FR-010).
 2. **Given** the same section, **When** a reader looks up server-wide PATs, **Then** it explains
    that a PAT reaching the server through the runtime's environment (as the installer
    configures) or through sting's config file applies to every tool call, and overrides the

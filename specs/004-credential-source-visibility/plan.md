@@ -51,7 +51,7 @@ package changes.
 | I | Read-only by design | No new tool or mutation path; the tool set and `ReadOnlyTools()` are untouched | PASS |
 | II | Evidence-grade output | Results are unchanged. The report is stderr-only diagnostics, and putting the source into `Result` is explicitly deferred (spec Assumptions) | PASS |
 | III | Deterministic queries | No change to query resolution, windows, or bounds | PASS |
-| IV | Explicit config, dedicated credentials | The `verbose` key goes through viper's flags > env > file precedence; credential precedence is unchanged; `Resolution` has no token field and a test asserts the token never appears (FR-009) | PASS |
+| IV | Explicit config, dedicated credentials | The `verbose` key goes through viper's flags > env > file precedence; credential precedence is unchanged; `resolution` has no token field and tests assert the token never appears (FR-009). This change adds no ambient-token reading. It does surface a **pre-existing** deviation, the `STING_ALLOW_AMBIENT_GITHUB_TOKEN` opt-in (see Complexity Tracking) | PASS for this change; pre-existing deviation recorded |
 | V | Public packages are the contract | No change to `model`, `config`, `ghclient`, or `gitlabclient`; verbosity stays in `internal/cli` (research R3); `SchemaVersion` unchanged | PASS |
 | VI | Partial results over blindness | Strengthened: a failed stored-credential lookup that degrades to anonymous becomes reportable instead of silent | PASS |
 | VII | Never a second source of truth | Nothing persisted; installer untouched | PASS |
@@ -108,4 +108,9 @@ README.
 
 ## Complexity Tracking
 
-No constitution violations to justify.
+This feature introduces no constitution violations. It does make one **pre-existing**
+deviation visible, recorded here so the gate above is not read as clearing it:
+
+| Deviation | Origin | Status |
+|-----------|--------|--------|
+| `internal/credentials` reads `GH_TOKEN` / `GITHUB_TOKEN` or the `gh` config file when `STING_ALLOW_AMBIENT_GITHUB_TOKEN` is set. That conflicts with Principle IV ("MUST NOT read ambient provider tokens"), ADR 0002, and ADR 0008 ("intentionally never consulted"). | PR #32 narrowed a previously *unconditional* ambient fallback to this opt-in as the safer default, and deferred the matching ADR update to a separate docs PR that never landed. | Unresolved by this feature. It needs a maintainer decision: remove the opt-in, or supersede ADR 0002/0008 and amend Principle IV to sanction it. This feature only labels the path honestly in reports and docs; it neither extends nor endorses it. |

@@ -6,20 +6,104 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/skaphos/sting/config"
 	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 const reportPrefix = "sting: credential: "
 
-func TestVerboseFlagIsPersistentAndBound(t *testing.T) {
-	if rootCmd.PersistentFlags().Lookup("verbose") == nil {
-		t.Fatal("--verbose must be a persistent flag so every command accepts it")
+// runRoot executes the real command tree (cobra parsing, OnInitialize config
+// loading, and the init-time flag bindings) against a fresh viper, then
+// restores every flag it may have touched so later tests see pristine state.
+func runRoot(t *testing.T, args ...string) (stdout, stderr string) {
+	t.Helper()
+	orig := v
+	v = viper.New()
+	bindPersistentFlags(v)
+	t.Cleanup(func() {
+		v = orig
+		for _, fs := range []*pflag.FlagSet{rootCmd.PersistentFlags(), queryCmd.Flags()} {
+			fs.VisitAll(func(f *pflag.Flag) {
+				// Set(DefValue) on a slice flag would store the literal "[]".
+				if sv, ok := f.Value.(pflag.SliceValue); ok {
+					_ = sv.Replace(nil)
+				} else {
+					_ = f.Value.Set(f.DefValue)
+				}
+				f.Changed = false
+			})
+		}
+		rootCmd.SetArgs(nil)
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	})
+
+	var out, errBuf bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs(args)
+	// The fixture server returns no commits, so the run may still fail after
+	// the client is built; the report is written at construction, so log rather
+	// than fail, keeping the cause visible if a case stops earlier.
+	if err := rootCmd.Execute(); err != nil {
+		t.Logf("execute: %v", err)
 	}
+	return out.String(), errBuf.String()
+}
+
+// TestVerboseEnabledThroughEverySurface covers FR-004 end to end: the parsed
+// --verbose flag, STING_VERBOSE, and `verbose: true` in a config file each turn
+// the report on through the real binding and config-loading path.
+func TestVerboseEnabledThroughEverySurface(t *testing.T) {
+	srv := commitServer(t)
+	query := []string{"query", "--author", "alice", "--scope", "repos", "--repos", "a/b", "-o", "json"}
+	want := reportPrefix + "github 127.0.0.1: dedicated PAT\n"
+
+	cases := map[string]func(t *testing.T) []string{
+		"flag": func(*testing.T) []string {
+			return append(query, "--verbose", "--token", "fixture-secret", "--base-url", srv.URL+"/")
+		},
+		"env": func(t *testing.T) []string {
+			t.Setenv("STING_VERBOSE", "true")
+			return append(query, "--token", "fixture-secret", "--base-url", srv.URL+"/")
+		},
+		"config file": func(t *testing.T) []string {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			body := "verbose: true\ntoken: fixture-secret\nbase_url: " + srv.URL + "/\n"
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return append(query, "--config", path)
+		},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			isolateHome(t)
+			stdout, stderr := runRoot(t, args(t)...)
+			if stderr != want {
+				t.Fatalf("stderr = %q, want %q", stderr, want)
+			}
+			if strings.Contains(stdout, reportPrefix) || strings.Contains(stdout+stderr, "fixture-secret") {
+				t.Fatalf("report or secret leaked: stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
+	}
+
+	t.Run("off by default", func(t *testing.T) {
+		isolateHome(t)
+		_, stderr := runRoot(t, append(query, "--token", "fixture-secret", "--base-url", srv.URL+"/")...)
+		if stderr != "" {
+			t.Fatalf("non-verbose stderr must be empty, got %q", stderr)
+		}
+	})
 }
 
 // TestDiagnosticsGate covers the three ways to enable verbosity and the
