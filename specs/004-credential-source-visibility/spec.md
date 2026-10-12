@@ -23,8 +23,12 @@ precedence settled in [ADR 0008](../../docs/adr/0008-oauth-app-authentication.md
    sting's credential file);
 3. anonymous.
 
-Ambient provider tokens (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `gh`/`glab` stored auth) are never
-consulted ([ADR 0002](../../docs/adr/0002-dedicated-pat-via-viper.md)).
+By default, ambient provider tokens (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `gh`/`glab` stored auth)
+are not consulted ([ADR 0002](../../docs/adr/0002-dedicated-pat-via-viper.md)). One exception
+exists, and it is opt-in: when `STING_ALLOW_AMBIENT_GITHUB_TOKEN` is set, the credential layer
+falls back to the ambient GitHub token in place of a stored sting credential. Today that switch
+is invisible. The README does not document it, and this feature only reports it, without
+changing it.
 
 That choice is never reported. `sting auth status` lists the credentials that are *stored*, but not
 the one a given run actually *used*. The failure that matters most is a silent drop to
@@ -142,6 +146,10 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
   was already written stays accurate.
 - **Self-hosted base URL with an API path** (for example `https://ghe.example.com/api/v3`): the
   reported host is the bare hostname used as the credential-storage key.
+- **Ambient opt-in enabled** (`STING_ALLOW_AMBIENT_GITHUB_TOKEN` set): the credential layer
+  already falls back to `GH_TOKEN` / `GITHUB_TOKEN` or the `gh` config file when no sting
+  credential is stored. When that happens, the report MUST say so explicitly. This is exactly
+  the kind of identity switch the report exists to expose.
 - **Secrets**: no token value, prefix, suffix, length, or hash appears in any report.
 
 ## Requirements *(mandatory)*
@@ -150,8 +158,12 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
 
 - **FR-001**: sting MUST be able to report, for each credential resolution, the selected source,
   the provider, and the host the credential was resolved for.
-- **FR-002**: The reported source MUST be exactly one of: dedicated PAT; stored OAuth credential
-  (keyring); stored OAuth credential (file); anonymous.
+- **FR-002**: The reported source MUST be exactly one of: dedicated PAT; stored credential from
+  the system keyring; stored credential from sting's credential file; ambient GitHub token
+  (opt-in, from the environment or the `gh` config file); anonymous. A stored credential MUST
+  also report its kind (OAuth token or PAT), because `sting auth gitlab --stdin` stores a PAT.
+  The ambient source MUST be labelled as opt-in, so it is never mistaken for a sting-owned
+  credential.
 - **FR-003**: Reporting MUST be off by default and enabled by an explicit verbosity setting.
   With it off, sting's output on every stream MUST be unchanged from current behavior.
 - **FR-004**: The verbosity setting MUST be controllable through sting's normal configuration
@@ -170,7 +182,8 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
   actually used.
 - **FR-009**: Reports MUST NOT contain any secret material or anything derived from it.
 - **FR-010**: This feature MUST NOT change which credential is selected. The ADR 0008
-  precedence and the ADR 0002 exclusion of ambient tokens stay exactly as they are.
+  precedence, the ADR 0002 default exclusion of ambient tokens, and the existing
+  `STING_ALLOW_AMBIENT_GITHUB_TOKEN` opt-in all stay exactly as they are.
 - **FR-011**: The README MUST document MCP-server credential precedence, how server-wide PATs
   (runtime environment or config file) interact with a stored OAuth login, how to make the
   server use the OAuth login, and how to enable verbose output for the server.
@@ -180,7 +193,8 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
 ### Key Entities
 
 - **Credential resolution report**: A diagnostic record of one credential selection. It holds
-  the provider (GitHub or GitLab), the host, the selected source (one of four values), and,
+  the provider (GitHub or GitLab), the host, the selected source (one of the FR-002 values),
+  the stored credential's kind where applicable, and,
   where it applies, an indication that a stored-credential lookup failed. It never includes the
   credential itself, and it is never part of the evidence result.
 
@@ -188,7 +202,8 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
 
 ### Measurable Outcomes
 
-- **SC-001**: For all four credential situations (PAT, keyring OAuth, file OAuth, none), a user
+- **SC-001**: For every credential situation (dedicated PAT, keyring-stored, file-stored, opt-in
+  ambient, none), a user
   can name the credential a run used from one verbose run, without reading source code or
   `auth status`.
 - **SC-002**: With verbose output off, every existing CLI and MCP test's output is unchanged
