@@ -4,6 +4,8 @@ package commitclient
 import (
 	"fmt"
 	"io"
+	"strings"
+	"unicode"
 
 	"github.com/skaphos/sting/internal/credentials"
 	"github.com/skaphos/sting/model"
@@ -87,6 +89,18 @@ func (r resolution) describe() string {
 		}
 		return "anonymous"
 	}
+}
+
+// singleLine flattens an error message from the keyring/OS so a report stays
+// exactly one line: an embedded \n or \r would otherwise split it, or forge a
+// second, legitimate-looking "sting: credential:" line on stderr.
+func singleLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func kindLabel(k credentials.TokenType) string {

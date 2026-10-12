@@ -136,7 +136,7 @@ func resolveToken(dedicated string, provider model.Provider, credProvider creden
 		return tok.AccessToken, r
 	case err != nil && !errors.Is(err, credentials.ErrNotFound):
 		// Load's own errors name only provider, host, and the keyring's error.
-		r.lookupReason = err.Error()
+		r.lookupReason = singleLine(err.Error())
 	}
 	return "", r
 }
