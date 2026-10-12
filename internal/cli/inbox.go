@@ -22,8 +22,8 @@ func registerInboxFlags(cmd *cobra.Command) {
 	})
 }
 
-var collectPRInbox = func(ctx context.Context, cfg config.Config, q model.PRInboxQuery) (model.PRInboxResult, error) {
-	c, err := commitclient.NewPR(cfg)
+var collectPRInbox = func(ctx context.Context, cfg config.Config, q model.PRInboxQuery, opts ...commitclient.Option) (model.PRInboxResult, error) {
+	c, err := commitclient.NewPR(cfg, opts...)
 	if err != nil {
 		return model.PRInboxResult{}, err
 	}
@@ -51,7 +51,7 @@ func runInbox(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), queryTimeout)
 	defer cancel()
-	result, collectErr := collectPRInbox(ctx, cfg, q)
+	result, collectErr := collectPRInbox(ctx, cfg, q, commitclient.WithCredentialReport(diagnostics(cmd)))
 	if result.SchemaVersion != "" {
 		out, e := render.RenderPRInbox(result, format)
 		if e != nil {

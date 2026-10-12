@@ -35,8 +35,15 @@ anonymous
 anonymous (stored-credential lookup failed: <reason>)
 ```
 
-`<reason>` is the credential store's error text (provider, host, file path, keyring/OS error).
-It never contains token material (FR-009).
+`<reason>` is one of the following:
+
+- the credential store's own `Load` error, which names only the provider, the host, and the
+  keyring/OS error (for example, a locked keyring); or
+- the fixed text `credentials file could not be read`, used when the store cannot be opened.
+  The underlying error is deliberately dropped, because a YAML parse error can quote the
+  offending line of `hosts.yml`, and that line may hold a token.
+
+Neither form ever contains token material (FR-009).
 
 ### Examples
 

@@ -18,7 +18,7 @@ unset STING_TOKEN STING_GITLAB_TOKEN STING_ALLOW_AMBIENT_GITHUB_TOKEN STING_VERB
 |---|-------|---------|----------------------|
 | 1 | none | `./sting query --author octocat --verbose -o json > out1.json` | `sting: credential: github github.com: anonymous` |
 | 2 | `STING_TOKEN=<pat>` | same | `… github github.com: dedicated PAT` |
-| 3 | `sting auth github --insecure-storage` completed, no PAT | same | `… github github.com: stored oauth token (file)` |
+| 3 | `printf '<pat>\n' \| ./sting auth gitlab --with-token --insecure-storage --hostname gitlab.example.com` | `./sting query --provider gitlab --gitlab-base-url https://gitlab.example.com/api/v4 --scope repos --repos g/p --author someone --verbose` | `… gitlab gitlab.example.com: stored pat (file)` |
 | 4 | none | `./sting query --provider gitlab --author someone --gitlab-base-url https://gitlab.example.com/api/v4 --verbose` | `… gitlab gitlab.example.com: anonymous` |
 | 5 | `STING_VERBOSE=true` instead of the flag | scenario 1 command without `--verbose` | same as scenario 1 |
 | 6 | scenario 2 setup, verbose **off** | `./sting query --author octocat -o json > out6.json 2> err6.txt` | `err6.txt` empty; `out6.json` has the same shape as `out1.json` |

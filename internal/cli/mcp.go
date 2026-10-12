@@ -18,7 +18,7 @@ var mcpCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		server, err := mcpserver.New(cfg)
+		server, err := mcpserver.New(cfg, mcpserver.WithDiagnostics(diagnostics(cmd)))
 		if err != nil {
 			return err
 		}

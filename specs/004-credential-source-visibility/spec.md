@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-11
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Credential source visibility (scoped slice of GitHub issue skaphos/sting#45). Surface the selected credential source + provider + host (never the secret) on stderr for CLI commands and every MCP tool call, at an opt-in verbosity so default output is unchanged; document MCP-server mixed-auth precedence. Out of scope: TokenSource/Authenticator interface refactor, OAuth token refresh/expiry handling."
 
@@ -161,7 +161,7 @@ PAT and an OAuth login exist?" and "how do I make it use OAuth?" from the README
 - **FR-002**: The reported source MUST be exactly one of: dedicated PAT; stored credential from
   the system keyring; stored credential from sting's credential file; ambient GitHub token
   (opt-in, from the environment or the `gh` config file); anonymous. A stored credential MUST
-  also report its kind (OAuth token or PAT), because `sting auth gitlab --stdin` stores a PAT.
+  also report its kind (OAuth token or PAT), because `sting auth gitlab --with-token` stores a PAT.
   The ambient source MUST be labelled as opt-in, so it is never mistaken for a sting-owned
   credential.
 - **FR-003**: Reporting MUST be off by default and enabled by an explicit verbosity setting.

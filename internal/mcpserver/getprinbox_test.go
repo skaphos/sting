@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -16,7 +17,7 @@ func TestPRInboxMCPIsolatesInvalidWindow(t *testing.T) {
 	old := collectPRInbox
 	t.Cleanup(func() { collectPRInbox = old })
 	calls := 0
-	collectPRInbox = func(_ context.Context, _ config.Config, q model.PRInboxQuery) (model.PRInboxResult, error) {
+	collectPRInbox = func(_ context.Context, _ config.Config, q model.PRInboxQuery, _ ...commitclient.Option) (model.PRInboxResult, error) {
 		calls++
 		return model.PRInboxResult{SchemaVersion: model.PRInboxSchemaVersion, Query: q, PRs: []model.PRInboxEntry{}}, nil
 	}

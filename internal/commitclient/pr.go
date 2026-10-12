@@ -18,8 +18,10 @@ type PRClient interface {
 
 // NewPR selects sting's dedicated GitHub credential and preserves the API host.
 // Each public collection call establishes its own query-authoritative budget.
-func NewPR(cfg config.Config) (PRClient, error) {
-	client, err := ghclient.New(resolveGitHubToken(cfg), cfg.BaseURL, cfg.PerPage)
+func NewPR(cfg config.Config, opts ...Option) (PRClient, error) {
+	token, r := resolveGitHubToken(cfg)
+	applyOptions(opts).emit(r)
+	client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage)
 	if err != nil {
 		return nil, fmt.Errorf("configure GitHub PR client: check base_url syntax")
 	}

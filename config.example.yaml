@@ -50,3 +50,8 @@ max_requests: 500
 
 # PR activity/inbox result cap (STING_MAX_PRS / --max-prs; 0 disables).
 max_prs: 100
+
+# Report which credential each query (or MCP tool call) used, on stderr only
+# (STING_VERBOSE / --verbose). Never prints the credential itself. Useful when an
+# MCP server's environment is set by an agent runtime and cannot be inspected.
+verbose: false

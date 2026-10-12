@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -16,7 +17,7 @@ func TestPRInboxCLIFailures(t *testing.T) {
 	old := collectPRInbox
 	t.Cleanup(func() { collectPRInbox = old })
 	for _, report := range []bool{false, true} {
-		collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery) (model.PRInboxResult, error) {
+		collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery, ...commitclient.Option) (model.PRInboxResult, error) {
 			if !report {
 				return model.PRInboxResult{}, errors.New("client setup failed")
 			}

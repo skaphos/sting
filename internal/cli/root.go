@@ -9,6 +9,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,7 @@ func init() {
 	pf.String("gitlab-base-url", "", "GitLab API v4 base URL")
 	pf.Int("per-page", 100, "API page size (1-100)")
 	pf.Int("max-commits", config.DefaultMaxCommits, "cap on returned commits (0 = unlimited)")
+	pf.Bool("verbose", false, "report which credential each query used on stderr (never the credential itself)")
 
 	// Bind the config-bearing persistent flags to their viper keys so flags win
 	// over env and file when set.
@@ -61,6 +63,7 @@ func init() {
 	must(v.BindPFlag("gitlab_base_url", pf.Lookup("gitlab-base-url")))
 	must(v.BindPFlag("per_page", pf.Lookup("per-page")))
 	must(v.BindPFlag("max_commits", pf.Lookup("max-commits")))
+	must(v.BindPFlag("verbose", pf.Lookup("verbose")))
 
 	registerQueryFlags(rootCmd)
 	// Also register on the query subcommand so `sting query --author ...` works
@@ -145,6 +148,18 @@ func loadConfig() (config.Config, error) {
 		return config.Config{}, err
 	}
 	return cfg, nil
+}
+
+// diagnostics returns the writer for verbose-only diagnostics: the command's
+// stderr when verbose is on (flag, STING_VERBOSE, or config "verbose"), nil
+// otherwise. Verbosity stays out of the public config.Config because it is an
+// application concern, not a query default (ADR 0004). Stdout is never used:
+// it carries evidence, and for `sting mcp` the protocol stream.
+func diagnostics(cmd *cobra.Command) io.Writer {
+	if !v.GetBool("verbose") {
+		return nil
+	}
+	return cmd.ErrOrStderr()
 }
 
 // Execute runs the root command and exits with a shell-friendly status.

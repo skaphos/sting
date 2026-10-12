@@ -118,7 +118,7 @@ func runActivity(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	client, err := commitclient.NewActivity(cfg, q)
+	client, err := commitclient.NewActivity(cfg, q, commitclient.WithCredentialReport(diagnostics(cmd)))
 	if err != nil {
 		return err
 	}

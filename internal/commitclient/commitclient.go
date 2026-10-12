@@ -4,6 +4,7 @@ package commitclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -35,11 +36,12 @@ type ActivityClient interface {
 // rejection lives in config.ResolveActivity so the failure is identical whether
 // the request came from the CLI or from MCP, and is unreachable with a
 // half-built client behind it.
-func NewActivity(cfg config.Config, q model.ActivityQuery) (ActivityClient, error) {
+func NewActivity(cfg config.Config, q model.ActivityQuery, opts ...Option) (ActivityClient, error) {
 	if q.Provider != "" && q.Provider != model.ProviderGitHub {
 		return nil, fmt.Errorf("provider %q does not support repository activity (github only)", q.Provider)
 	}
-	token := resolveGitHubToken(cfg)
+	token, r := resolveGitHubToken(cfg)
+	applyOptions(opts).emit(r)
 	client, err := ghclient.New(token, cfg.BaseURL, cfg.PerPage, ghclient.WithRequestBudget(q.MaxRequests))
 	if err != nil {
 		return nil, fmt.Errorf("build github client: %w", err)
@@ -56,11 +58,13 @@ func NewActivity(cfg config.Config, q model.ActivityQuery) (ActivityClient, erro
 // It takes the whole query rather than just the provider so the per-call request
 // ceiling reaches the client; a ceiling resolved into the query but never handed
 // to the transport would be silently ignored.
-func New(cfg config.Config, q model.Query) (Client, error) {
+func New(cfg config.Config, q model.Query, opts ...Option) (Client, error) {
+	o := applyOptions(opts)
 	provider := q.Provider
 	switch provider {
 	case model.ProviderGitHub:
-		token := resolveGitHubToken(cfg)
+		token, r := resolveGitHubToken(cfg)
+		o.emit(r)
 		// Account for every author-scoped path too, not just the activity one:
 		// the transport-level budget covers search, repos, org, PR discovery,
 		// and enrichment without any of them knowing about it.
@@ -71,7 +75,8 @@ func New(cfg config.Config, q model.Query) (Client, error) {
 		}
 		return client, nil
 	case model.ProviderGitLab:
-		token := resolveGitLabToken(cfg)
+		token, r := resolveGitLabToken(cfg)
+		o.emit(r)
 		client, err := gitlabclient.New(token, cfg.GitLabBaseURL, cfg.PerPage,
 			gitlabclient.WithRequestBudget(q.MaxRequests))
 		if err != nil {
@@ -90,36 +95,50 @@ func New(cfg config.Config, q model.Query) (Client, error) {
 // CLI's stored auth, etc.) are intentionally never consulted, preserving the
 // strict separation of ADR 0002; do not add such a fallback here. See ADR 0008
 // for the full precedence rationale.
-func resolveGitHubToken(cfg config.Config) string {
-	if cfg.Token != "" {
-		return cfg.Token
-	}
-
-	if store, err := credentials.New(); err == nil {
-		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitHub, githubHost(cfg)); err == nil && tok.AccessToken != "" {
-			return tok.AccessToken
-		}
-	}
-
-	return ""
+func resolveGitHubToken(cfg config.Config) (string, resolution) {
+	return resolveToken(cfg.Token, model.ProviderGitHub, credentials.ProviderGitHub, githubHost(cfg))
 }
 
 // resolveGitLabToken mirrors resolveGitHubToken for GitLab: dedicated PAT
 // (cfg.GitLabToken) wins, then the OAuth token from `sting auth gitlab`, then
 // anonymous. Ambient GITLAB_TOKEN / glab credentials are intentionally never
 // consulted (ADR 0002); see ADR 0008.
-func resolveGitLabToken(cfg config.Config) string {
-	if cfg.GitLabToken != "" {
-		return cfg.GitLabToken
+func resolveGitLabToken(cfg config.Config) (string, resolution) {
+	return resolveToken(cfg.GitLabToken, model.ProviderGitLab, credentials.ProviderGitLab, gitlabHost(cfg))
+}
+
+// openCredentialStore is a package variable so tests can substitute a fake
+// store instead of reaching the real system keyring.
+var openCredentialStore = credentials.New
+
+// resolveToken applies the shared precedence and records which tier won. A
+// failed stored-credential lookup still falls through to anonymous exactly as
+// before; the resolution only makes that fallback explainable.
+func resolveToken(dedicated string, provider model.Provider, credProvider credentials.Provider, host string) (string, resolution) {
+	r := resolution{provider: provider, host: host, source: sourceAnonymous}
+	if dedicated != "" {
+		r.source = sourceDedicated
+		return dedicated, r
 	}
 
-	if store, err := credentials.New(); err == nil {
-		if tok, _, err := store.Load(context.Background(), credentials.ProviderGitLab, gitlabHost(cfg)); err == nil && tok.AccessToken != "" {
-			return tok.AccessToken
-		}
+	store, err := openCredentialStore()
+	if err != nil {
+		// The underlying error can quote credentials-file contents (a YAML
+		// parse error echoes the offending line), so it is never reported.
+		r.lookupReason = "credentials file could not be read"
+		return "", r
 	}
-
-	return ""
+	tok, src, err := store.Load(context.Background(), credProvider, host)
+	switch {
+	case err == nil && tok.AccessToken != "":
+		r.source = storedSource(src)
+		r.kind = tok.Type
+		return tok.AccessToken, r
+	case err != nil && !errors.Is(err, credentials.ErrNotFound):
+		// Load's own errors name only provider, host, and the keyring's error.
+		r.lookupReason = err.Error()
+	}
+	return "", r
 }
 
 // githubHost returns the hostname to use when looking up GitHub credentials.

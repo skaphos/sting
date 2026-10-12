@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/skaphos/sting/config"
+	"github.com/skaphos/sting/internal/commitclient"
 	"github.com/skaphos/sting/model"
 )
 
@@ -19,14 +20,14 @@ func TestPRInboxMCPFailureAndPanic(t *testing.T) {
 	old := collectPRInbox
 	t.Cleanup(func() { collectPRInbox = old })
 	h := &handler{cfg: config.Default()}
-	collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery) (model.PRInboxResult, error) {
+	collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery, ...commitclient.Option) (model.PRInboxResult, error) {
 		return model.PRInboxResult{SchemaVersion: model.PRInboxSchemaVersion, PRs: []model.PRInboxEntry{}, Truncated: true}, errors.New("fixture failure")
 	}
 	res, out, e := h.getPRInbox(context.Background(), nil, GetPRInboxInput{User: "octocat"})
 	if e != nil || !res.IsError || out.SchemaVersion == "" {
 		t.Fatal("partial failure discarded")
 	}
-	collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery) (model.PRInboxResult, error) {
+	collectPRInbox = func(context.Context, config.Config, model.PRInboxQuery, ...commitclient.Option) (model.PRInboxResult, error) {
 		panic("private-panic-token")
 	}
 	res, _, e = h.getPRInbox(context.Background(), nil, GetPRInboxInput{User: "octocat"})

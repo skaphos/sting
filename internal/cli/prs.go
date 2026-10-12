@@ -86,8 +86,8 @@ func prSharedRequest(cmd *cobra.Command) (config.PRInboxRequest, error) {
 	return r, nil
 }
 
-var collectPRActivity = func(ctx context.Context, cfg config.Config, q model.PRQuery) (model.PRResult, error) {
-	c, err := commitclient.NewPR(cfg)
+var collectPRActivity = func(ctx context.Context, cfg config.Config, q model.PRQuery, opts ...commitclient.Option) (model.PRResult, error) {
+	c, err := commitclient.NewPR(cfg, opts...)
 	if err != nil {
 		return model.PRResult{}, err
 	}
@@ -123,7 +123,7 @@ func runPRs(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), queryTimeout)
 	defer cancel()
-	result, collectErr := collectPRActivity(ctx, cfg, q)
+	result, collectErr := collectPRActivity(ctx, cfg, q, commitclient.WithCredentialReport(diagnostics(cmd)))
 	if result.SchemaVersion != "" {
 		out, e := render.RenderPRs(result, format)
 		if e != nil {

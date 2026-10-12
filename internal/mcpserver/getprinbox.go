@@ -24,8 +24,8 @@ type GetPRInboxInput struct {
 	MaxRequests *int     `json:"max_requests,omitempty"`
 }
 
-var collectPRInbox = func(ctx context.Context, cfg config.Config, q model.PRInboxQuery) (model.PRInboxResult, error) {
-	c, err := commitclient.NewPR(cfg)
+var collectPRInbox = func(ctx context.Context, cfg config.Config, q model.PRInboxQuery, opts ...commitclient.Option) (model.PRInboxResult, error) {
+	c, err := commitclient.NewPR(cfg, opts...)
 	if err != nil {
 		return model.PRInboxResult{}, err
 	}
@@ -44,7 +44,7 @@ func (h *handler) getPRInbox(ctx context.Context, _ *mcp.CallToolRequest, in Get
 	if err != nil {
 		return nil, model.PRInboxResult{}, err
 	}
-	out, err = collectPRInbox(ctx, h.cfg, q)
+	out, err = collectPRInbox(ctx, h.cfg, q, h.report())
 	if out.SchemaVersion == "" {
 		return nil, out, err
 	}

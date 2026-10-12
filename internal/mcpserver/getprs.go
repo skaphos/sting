@@ -31,8 +31,8 @@ type GetPRsInput struct {
 	MaxRequests *int     `json:"max_requests,omitempty"`
 }
 
-var collectPRs = func(ctx context.Context, cfg config.Config, q model.PRQuery) (model.PRResult, error) {
-	c, err := commitclient.NewPR(cfg)
+var collectPRs = func(ctx context.Context, cfg config.Config, q model.PRQuery, opts ...commitclient.Option) (model.PRResult, error) {
+	c, err := commitclient.NewPR(cfg, opts...)
 	if err != nil {
 		return model.PRResult{}, err
 	}
@@ -51,7 +51,7 @@ func (h *handler) getPRs(ctx context.Context, _ *mcp.CallToolRequest, in GetPRsI
 	if err != nil {
 		return nil, model.PRResult{}, err
 	}
-	out, err = collectPRs(ctx, h.cfg, q)
+	out, err = collectPRs(ctx, h.cfg, q, h.report())
 	if out.SchemaVersion == "" {
 		return nil, out, err
 	}
