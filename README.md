@@ -170,10 +170,13 @@ For each provider and host, sting picks the most explicit credential available
 3. **Anonymous**: public data only. Private repositories are silently absent.
 
 sting never reads `GITHUB_TOKEN`, `GITLAB_TOKEN`, or the `gh`/`glab` stored
-logins on its own. The one exception is opt-in: setting
+logins on its own. One opt-in exception currently exists:
 `STING_ALLOW_AMBIENT_GITHUB_TOKEN=true` lets sting fall back to `GH_TOKEN` /
 `GITHUB_TOKEN` or the `gh` config file when no stored sting credential exists
-for a GitHub host.
+for a GitHub host. This opt-in conflicts with sting's dedicated-credential
+policy ([ADR 0002](docs/adr/0002-dedicated-pat-via-viper.md)) and is
+**deprecated and scheduled for removal**
+([#164](https://github.com/skaphos/sting/issues/164)). Do not rely on it.
 
 The host comes from the base URL (`base_url` / `gitlab_base_url`), so an OAuth
 login for `ghe.example.com` is never used for `github.com`, and the reverse.
