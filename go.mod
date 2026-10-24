@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	github.com/atotto/clipboard v0.1.4
-	github.com/cli/go-gh/v2 v2.16.2
+	github.com/cli/go-gh/v2 v2.17.0
 	github.com/cli/oauth v1.2.2
 	github.com/google/go-github/v91 v91.0.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -41,7 +41,7 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/thlib/go-timezone-local v0.0.8 // indirect
+	github.com/thlib/go-timezone-local v0.0.9 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
