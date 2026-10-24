@@ -5,7 +5,7 @@ go 1.27.2
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/cli/go-gh/v2 v2.16.2
-	github.com/cli/oauth v1.2.2
+	github.com/cli/oauth v1.3.0
 	github.com/google/go-github/v91 v91.0.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
