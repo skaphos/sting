@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/skaphos/sting/internal/activity"
 	"github.com/skaphos/sting/internal/apibudget"
 	"github.com/skaphos/sting/internal/patch"
