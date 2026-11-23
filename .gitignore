@@ -29,3 +29,8 @@ vendor/
 Thumbs.db
 *.tmp
 *.swp
+
+# Claude Code
+# .claude/skills/ is tracked; worktrees and per-machine settings are local only.
+.claude/worktrees/
+.claude/settings.local.json
