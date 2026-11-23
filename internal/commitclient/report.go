@@ -44,12 +44,10 @@ func (o options) emit(r resolution) {
 type credSource string
 
 const (
-	sourceDedicated  credSource = "dedicated"
-	sourceKeyring    credSource = "keyring"
-	sourceFile       credSource = "file"
-	sourceAmbientEnv credSource = "ambient-env"
-	sourceAmbientGH  credSource = "ambient-gh"
-	sourceAnonymous  credSource = "anonymous"
+	sourceDedicated credSource = "dedicated"
+	sourceKeyring   credSource = "keyring"
+	sourceFile      credSource = "file"
+	sourceAnonymous credSource = "anonymous"
 )
 
 // resolution records which credential a constructor selected. It deliberately
@@ -79,10 +77,6 @@ func (r resolution) describe() string {
 		return "stored " + kindLabel(r.kind) + " (keyring)"
 	case sourceFile:
 		return "stored " + kindLabel(r.kind) + " (file)"
-	case sourceAmbientEnv:
-		return "ambient token from environment (opt-in)"
-	case sourceAmbientGH:
-		return "ambient token from gh config (opt-in)"
 	default:
 		if r.lookupReason != "" {
 			return "anonymous (stored-credential lookup failed: " + r.lookupReason + ")"
@@ -110,18 +104,10 @@ func kindLabel(k credentials.TokenType) string {
 	return "oauth token"
 }
 
-// storedSource maps the credential store's Source onto a report tier. The
-// ambient sources are only reachable under STING_ALLOW_AMBIENT_GITHUB_TOKEN,
-// which is why they are labelled opt-in rather than as sting credentials.
+// storedSource maps the credential store's Source onto a report tier.
 func storedSource(src credentials.Source) credSource {
-	switch src {
-	case credentials.SourceKeyring:
+	if src == credentials.SourceKeyring {
 		return sourceKeyring
-	case credentials.SourceEnv:
-		return sourceAmbientEnv
-	case credentials.SourceConfig:
-		return sourceAmbientGH
-	default:
-		return sourceFile
 	}
+	return sourceFile
 }
