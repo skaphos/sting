@@ -170,13 +170,10 @@ For each provider and host, sting picks the most explicit credential available
 3. **Anonymous**: public data only. Private repositories are silently absent.
 
 sting never reads `GITHUB_TOKEN`, `GITLAB_TOKEN`, or the `gh`/`glab` stored
-logins on its own. One opt-in exception currently exists:
-`STING_ALLOW_AMBIENT_GITHUB_TOKEN=true` lets sting fall back to `GH_TOKEN` /
-`GITHUB_TOKEN` or the `gh` config file when no stored sting credential exists
-for a GitHub host. This opt-in conflicts with sting's dedicated-credential
-policy ([ADR 0002](docs/adr/0002-dedicated-pat-via-viper.md)) and is
-**deprecated and scheduled for removal**
-([#164](https://github.com/skaphos/sting/issues/164)). Do not rely on it.
+logins, and there is no setting that makes it do so
+([ADR 0002](docs/adr/0002-dedicated-pat-via-viper.md)). The former
+`STING_ALLOW_AMBIENT_GITHUB_TOKEN` opt-in has been removed and is now ignored;
+if you relied on it, run `sting auth github` or set `STING_TOKEN` instead.
 
 The host comes from the base URL (`base_url` / `gitlab_base_url`), so an OAuth
 login for `ghe.example.com` is never used for `github.com`, and the reverse.
@@ -196,7 +193,6 @@ sting: credential: github github.com: stored oauth token (keyring)
 | `dedicated PAT` | `token` / `gitlab_token` from a flag, the environment, or the config file |
 | `stored oauth token (keyring)` / `stored pat (keyring)` | saved by `sting auth`, read from the system keyring |
 | `stored oauth token (file)` / `stored pat (file)` | saved by `sting auth`, read from sting's `hosts.yml` |
-| `ambient token from environment (opt-in)` / `ambient token from gh config (opt-in)` | only with `STING_ALLOW_AMBIENT_GITHUB_TOKEN` |
 | `anonymous` | nothing configured or stored for this host |
 | `anonymous (stored-credential lookup failed: …)` | a stored credential could not be read (for example, a locked keyring), so the query ran anonymously |
 
@@ -292,8 +288,8 @@ process's own environment and config file:
   unset (or empty) in the runtime's environment and remove the config-file
   key. The installer's references (`${STING_TOKEN:-}`, `env_vars`, and so on)
   expand to nothing when the variable is unset, so they do not block OAuth.
-- Ambient tokens are not used unless `STING_ALLOW_AMBIENT_GITHUB_TOKEN` is set
-  in the server's environment.
+- Ambient tokens (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `gh`/`glab` logins) in the
+  server's environment are never used.
 
 To confirm what a running server uses, enable verbose output for it. Add
 `verbose: true` to sting's config file, or set `STING_VERBOSE=true` in the

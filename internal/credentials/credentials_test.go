@@ -602,18 +602,30 @@ func TestLoadInsecureHosts_PermissionError(t *testing.T) {
 	}
 }
 
-// TestLoadGitHubGHAuthFallbacks pins the ADR 0002 isolation contract: an ambient
-// GITHUB_TOKEN must never leak into a Sting Load. By default it is ignored
-// entirely; even when a stored credential exists, the stored credential wins;
-// and the ambient token is only ever consulted when explicitly opted in.
-func TestLoadGitHubGHAuthFallbacks(t *testing.T) {
-	// Fully isolate ambient auth sources so this test is deterministic.
-	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+// writeGHHostsFile plants a gh CLI config holding an oauth_token for
+// github.com in dir, so a test can prove Load ignores that source too.
+func writeGHHostsFile(t *testing.T, dir, token string) {
+	t.Helper()
+	body := "github.com:\n    oauth_token: " + token + "\n    user: someone\n"
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write gh hosts.yml: %v", err)
+	}
+}
+
+// TestLoadIgnoresAmbientGitHubTokens pins the ADR 0002 isolation contract: an
+// ambient GitHub token must never leak into a Sting Load. The stored credential
+// wins when one exists, and with none stored Load reports a miss -- including
+// when the retired STING_ALLOW_AMBIENT_GITHUB_TOKEN opt-in is still set.
+func TestLoadIgnoresAmbientGitHubTokens(t *testing.T) {
+	// Every ambient source go-gh would read is populated, so a regression that
+	// reintroduces any of them fails here rather than passing by accident.
+	ghDir := t.TempDir()
+	writeGHHostsFile(t, ghDir, "ambient-should-not-leak")
+	t.Setenv("GH_CONFIG_DIR", ghDir)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())
-	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN", "ambient-should-not-leak")
 	t.Setenv("GITHUB_TOKEN", "ambient-should-not-leak")
-	// Default: opt-in flag unset.
 	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "")
 
 	t.Run("stored credential wins over ambient env token", func(t *testing.T) {
@@ -637,35 +649,29 @@ func TestLoadGitHubGHAuthFallbacks(t *testing.T) {
 		}
 	})
 
-	t.Run("ambient env token is not consumed by default", func(t *testing.T) {
-		tmp := t.TempDir()
-		s := WithFilePath(tmp)
+	t.Run("ambient tokens are not consumed", func(t *testing.T) {
+		s := WithFilePath(t.TempDir())
 
-		// No stored credential. With the opt-in flag unset, an ambient
-		// GITHUB_TOKEN must NOT be returned; Load must report no credential.
-		_, _, err := s.Load(context.Background(), ProviderGitHub, "github.com")
-		if err == nil {
-			t.Fatal("expected no-credential error; ambient GITHUB_TOKEN must not be adopted by default")
+		// No stored credential: Load must report a genuine miss.
+		got, _, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("want ErrNotFound, got token %q, err %v", got.AccessToken, err)
 		}
 	})
 
-	t.Run("ambient env token consulted only when opted in", func(t *testing.T) {
-		t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "1")
+	// Regression guard for #164: the opt-in was removed, so every value that
+	// used to enable it must now be inert.
+	for _, v := range []string{"1", "true", "yes", "on", "TRUE"} {
+		t.Run("retired opt-in "+v+" is ignored", func(t *testing.T) {
+			t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", v)
+			s := WithFilePath(t.TempDir())
 
-		tmp := t.TempDir()
-		s := WithFilePath(tmp)
-
-		got, src, err := s.Load(context.Background(), ProviderGitHub, "github.com")
-		if err != nil {
-			t.Fatalf("Load with opt-in: %v", err)
-		}
-		if got.AccessToken != "ambient-should-not-leak" {
-			t.Fatalf("expected opted-in ambient token, got %q", got.AccessToken)
-		}
-		if src != SourceEnv {
-			t.Fatalf("expected SourceEnv for an env-var token, got %s", src)
-		}
-	})
+			got, _, err := s.Load(context.Background(), ProviderGitHub, "github.com")
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("want ErrNotFound, got token %q, err %v", got.AccessToken, err)
+			}
+		})
+	}
 }
 
 // TestDeleteCleansEmptyComposite exercises the branch where Delete removes the
@@ -822,14 +828,12 @@ func TestDeleteSurfacesKeyringFailure(t *testing.T) {
 
 // TestLoadErrorsWhenKeyringUnavailableWithMarker verifies that when a stored
 // credential is known to exist (keyring marker) but the keyring cannot be read,
-// Load returns an error instead of silently substituting an ambient token —
-// even with the ambient opt-in enabled.
+// Load returns an error instead of silently substituting an ambient token.
 func TestLoadErrorsWhenKeyringUnavailableWithMarker(t *testing.T) {
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())
 	t.Setenv("GITHUB_TOKEN", "ambient-must-not-be-substituted")
-	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "1") // even opted in, a locked keyring must error
 
 	tmp := t.TempDir()
 	s := WithKeyringForTest(lockedKeyring{}, tmp)
@@ -912,7 +916,6 @@ func TestSaveKeyringSuccessReturnsMarkerWriteError(t *testing.T) {
 func TestLoadErrNotFoundOnlyForGenuineMiss(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", t.TempDir())
-	t.Setenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN", "")
 	ctx := context.Background()
 
 	if _, _, err := WithFilePath(t.TempDir()).Load(ctx, ProviderGitHub, "github.com"); !errors.Is(err, ErrNotFound) {

@@ -15,12 +15,11 @@
 //     ~/.config/gh during development, testing, or error conditions.)
 //   - All insecure (plaintext) credential storage is written exclusively
 //     to Sting's own hosts.yml using our own minimal implementation.
-//   - We never shell out to `gh auth token`, and we never silently adopt an
-//     ambient GitHub token (GH_TOKEN / GITHUB_TOKEN or the gh CLI config
-//     file). Consulting those ambient sources is strictly opt-in via
-//     STING_ALLOW_AMBIENT_GITHUB_TOKEN, so a stored Sting credential is never
-//     transparently replaced by whatever identity happens to live in the
-//     surrounding shell.
+//   - We never shell out to `gh auth token`, and we never read an ambient
+//     GitHub token (GH_TOKEN / GITHUB_TOKEN or the gh CLI config file). There
+//     is no opt-in: the store returns only credentials Sting itself saved, so
+//     a query can never run as whatever identity happens to live in the
+//     surrounding shell (constitution Principle IV, ADR 0002, ADR 0008).
 //
 // The design follows the same logical "hosts.<composite>" structure that gh
 // uses for familiarity, but everything under Sting's own directory.
@@ -35,10 +34,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
-	ghauth "github.com/cli/go-gh/v2/pkg/auth"
 	"gopkg.in/yaml.v3"
 
 	"github.com/skaphos/sting/internal/keyring"
@@ -86,8 +83,6 @@ type Source string
 const (
 	SourceKeyring Source = "keyring"
 	SourceFile    Source = "file"
-	SourceEnv     Source = "environment" // legacy PATs from STING_TOKEN etc.
-	SourceConfig  Source = "config"      // legacy PATs from config file (viper)
 )
 
 // Store is the main abstraction for credential lifecycle.
@@ -288,29 +283,6 @@ func isKeyringMiss(err error) bool {
 	return err == nil || errors.Is(err, keyring.ErrNotFound)
 }
 
-// ambientGitHubTokenAllowed reports whether the caller has explicitly opted in
-// to letting Sting consult ambient GitHub tokens (environment variables or the
-// gh CLI config file). It is off by default to honor the isolation guarantee.
-func ambientGitHubTokenAllowed() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("STING_ALLOW_AMBIENT_GITHUB_TOKEN"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-// ambientSource maps a go-gh token source string to our Source enum. Tokens read
-// from environment variables (GH_TOKEN / GITHUB_TOKEN and the enterprise
-// variants) map to SourceEnv; tokens read from the gh config file map to
-// SourceConfig.
-func ambientSource(source string) Source {
-	if source == "oauth_token" {
-		return SourceConfig
-	}
-	return SourceEnv
-}
-
 // Save implements Store.
 func (s *store) Save(ctx context.Context, provider Provider, host string, tok Token, secureOnly bool) (bool, error) {
 	s.mu.Lock()
@@ -392,8 +364,8 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 	// 1. Try keyring (secure) first. Skipped entirely in file-only mode (nil backend).
 	//    A genuine miss (ErrNotFound) is fine and we fall through; any other error
 	//    means the keyring is present but unusable (locked, backend unavailable,
-	//    timeout). We remember that so we can refuse to silently substitute an
-	//    ambient identity for a Sting credential we know exists (see below).
+	//    timeout). We remember that so a Sting credential we know exists is
+	//    reported as unreadable rather than as absent (see below).
 	var keyringErr error
 	if s.kr != nil {
 		if tokStr, err := s.kr.Get(s.keyringSvc(provider, host), tokenKeyringUser(TokenTypeOAuth)); err == nil && tokStr != "" {
@@ -433,28 +405,17 @@ func (s *store) Load(ctx context.Context, provider Provider, host string) (Token
 			}
 			// A marker entry with no in-file token means the real secret lives in
 			// the keyring. If the keyring read failed above, the credential exists
-			// but we cannot read it: fail loudly rather than falling through to an
-			// ambient token, which would silently switch the caller's identity.
+			// but we cannot read it: fail loudly rather than reporting it as absent,
+			// which would silently downgrade the caller to an anonymous query.
 			if keyringErr != nil {
 				return Token{}, "", fmt.Errorf("a stored credential for %s/%s exists but the keyring is unavailable: %w", provider, host, keyringErr)
 			}
 		}
 	}
 
-	// 3. Ambient GitHub tokens (GH_TOKEN / GITHUB_TOKEN or the gh CLI config
-	//    file) are consulted ONLY when explicitly opted in. This preserves the
-	//    isolation guarantee (ADR 0002): by default Sting uses only its own
-	//    managed credential and never adopts the surrounding shell's identity.
-	//    We deliberately use TokenFromEnvOrConfig (never TokenForHost) so we do
-	//    not shell out to `gh auth token`.
-	if provider == ProviderGitHub && ambientGitHubTokenAllowed() {
-		if token, source := ghauth.TokenFromEnvOrConfig(host); token != "" {
-			return Token{
-				Type:        TokenTypeOAuth,
-				AccessToken: token,
-			}, ambientSource(source), nil
-		}
-	}
+	// There is deliberately no third tier. Ambient GitHub tokens (GH_TOKEN /
+	// GITHUB_TOKEN or the gh CLI config file) are never consulted, so a miss
+	// here is a miss (ADR 0002, ADR 0008).
 
 	// If the keyring was unusable and we had no on-disk entry either, surface the
 	// keyring error rather than a bare "not found" so operators can tell a locked
